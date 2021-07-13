@@ -4,7 +4,22 @@ Main application module.
 Contains responses to URIs.
 """
 
+import configparser
 import bottle
+import redis
+from json import loads as json_loads
+
+
+config = configparser.ConfigParser()
+config.read("main.cfg")
+PASSWORD = config["database"]["password"]
+if config["database"]["password"].lower() == "none":
+    PASSWORD = None
+database = redis.Redis(config["database"]["hostname"],
+                       int(config["database"]["port"]), 0,
+                       PASSWORD)
+if database.get("initialized") is not True:
+    pass
 
 
 @bottle.hook("after_request")

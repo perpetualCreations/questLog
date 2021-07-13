@@ -1,0 +1,9 @@
+{
+    "{{ name }}": {
+        "startTime": "{{ start }}",
+        "endTime": null,
+        "repeat": false,
+        "description": "{{ description }}",
+        "requires": []
+    }
+}
