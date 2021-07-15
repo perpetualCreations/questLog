@@ -1,7 +1,5 @@
 {
-    "{{ name }}": {
-        "publicKey": "{{ key }}",
-        "projects": {},
-        "todos": {}
-    }
+    "publicKey": "{{ key }}",
+    "projects": {},
+    "todos": {}
 }

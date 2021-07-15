@@ -34,6 +34,21 @@ if database.get("initialized") is not True:
         database.set(key, template[key])
 
 
-@application.route("/api/user/<username>", methods=["PUT"])
+@application.route("/api/user/<username>", methods=["PUT", "POST", "GET"])
 def api_get_handle(username):
     """Respond to PUT requests for user management API."""
+    if flask.request.method == "PUT":
+        if database.hget("lineages", username) is None:
+            if "key" in flask.request.args:
+                database.hset("lineages", username, {})
+                with open("json/user.json") as template_handler:
+                    template = json_loads(template_handler.read())
+                for key in template:
+                    database.hset("lineages:" + username, key, template[key])
+            else:
+                return flask.Response(
+                    "{'error': 'Request missing arguments.'}", 422,
+                    mimetype="application/json")
+        else:
+            return flask.Response("{'error': 'Resource already exists.'}", 409,
+                                  mimetype="application/json")
