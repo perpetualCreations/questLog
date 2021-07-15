@@ -3,7 +3,7 @@
     "endTime": null,
     "status": "init",
     "description": "{{ description }}",
-    "todos": {},
-    "depedencies": [],
-    "hubs": []
+    "requires": [],
+    "hubs": [],
+    "authors": []
 }

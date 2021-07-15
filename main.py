@@ -6,45 +6,49 @@ Contains responses to URIs.
 
 import configparser
 from json import loads as json_loads
-from ast import literal_eval
 import flask
-import redis
+import pymongo
+import gnupg
 
 
 config = configparser.ConfigParser()
 config.read("main.cfg")
 application = flask.Flask(__name__)
-PASSWORD = config["database"]["password"]
-if config["database"]["password"].lower() == "none":
-    PASSWORD = None
-SSL_PARAMETERS = {}
-if literal_eval(config["database"]["ssl"]) is True:
-    SSL_PARAMETERS = {"ssl_keyfile": config["database"]["ssl_key_path"],
-                      "ssl_certfile": config["database"]["ssl_cert_path"],
-                      "ssl_cert_reqs": "required",
-                      "ssl_ca_certs":
-                          config["database"]["ssl_cert_authority_cert_path"]}
-database = redis.Redis(config["database"]["hostname"],
-                       int(config["database"]["port"]), 0,
-                       PASSWORD, **SSL_PARAMETERS)
-if database.get("initialized") is not True:
-    with open("json/root.json") as template_handler:
-        template = json_loads(template_handler.read())
-    for key in template:
-        database.set(key, template[key])
+database = pymongo.MongoClient(config["database"]["host"]).quest_log
 
 
-@application.route("/api/user/<username>", methods=["PUT", "POST", "GET"])
-def api_get_handle(username):
+def fill_template(arguments: flask.request.ImmutableMultiDict, file: str) -> \
+        dict:
+    """
+    Given request arguments and JSON template file, complete template with \
+        declared data.
+
+    :param arguments: arguments to be applied to template
+    :type arguments: flask.request.ImmutableMultiDict
+    :param file: path to JSON template file to be read from for template
+    :type file: str
+    :return: dictionary representation of JSON template completed with request
+        arguments
+    :rtype: dict
+    """
+    with open(file) as template_handler:
+        template: dict = json_loads(template_handler.read())
+    for field in template:
+        template[field] = arguments[field]
+    return template
+
+
+@application.route("/api/user/<username>", methods=["PUT", "DELETE", "GET"])
+def api_user_handle(username):
     """Respond to PUT requests for user management API."""
+    user_data = database["users"].find_one({"username": username})
     if flask.request.method == "PUT":
-        if database.hget("lineages", username) is None:
-            if "key" in flask.request.args:
-                database.hset("lineages", username, {})
-                with open("json/user.json") as template_handler:
-                    template = json_loads(template_handler.read())
-                for key in template:
-                    database.hset("lineages:" + username, key, template[key])
+        if user_data is None:
+            if "key" in flask.request.args and "email" in flask.request.args:
+                database["users"].insert_one(
+                    fill_template(flask.request.args, "json/user.json") +
+                    {"username": username})
+                return flask.Response("", 201, mimetype="application/json")
             else:
                 return flask.Response(
                     "{'error': 'Request missing arguments.'}", 422,
@@ -52,3 +56,18 @@ def api_get_handle(username):
         else:
             return flask.Response("{'error': 'Resource already exists.'}", 409,
                                   mimetype="application/json")
+    elif flask.request.method == "DELETE":
+        if user_data is not None:
+            database["users"].delete_one({"username": username})
+            return flask.Response("", 204, mimetype="application/json")
+        else:
+            return flask.Response("{'error': 'Resource does not exist.'}", 404,
+                                  mimetype="application/json")
+    elif flask.request.method == "GET":
+        if user_data is not None:
+            return flask.Response(user_data, 200, mimetype="application/json")
+        else:
+            return flask.Response("{'error': 'Resource does not exist.'}", 404,
+                                  mimetype="application/json")
+    else:
+        return flask.abort(405)

@@ -1,5 +1,4 @@
 {
-    "publicKey": "{{ key }}",
-    "projects": {},
-    "todos": {}
+    "key": "",
+    "email": ""
 }

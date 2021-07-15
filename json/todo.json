@@ -2,6 +2,10 @@
     "startTime": "{{ start }}",
     "endTime": null,
     "repeat": false,
+    "status": "init",
     "description": "{{ description }}",
-    "requires": []
+    "requires": [],
+    "hubs": [],
+    "authors": [],
+    "projects": []
 }
