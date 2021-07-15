@@ -39,7 +39,10 @@ def fill_template(arguments: flask.request.ImmutableMultiDict, file: str) -> \
     with open(file) as template_handler:
         template: dict = json_loads(template_handler.read())
     for field in template:
-        template[field] = arguments[field]
+        try:
+            template[field] = arguments[field]
+        except KeyError:
+            continue
     return template
 
 
@@ -86,15 +89,21 @@ def validate_challenge(username: str, solution: str) -> bool:
         return False
 
 
-@application.route("/api/user/<username>", methods=["PUT", "DELETE", "GET"])
+@application.route("/api/user/<username>",
+                   methods=["PUT", "PATCH", "DELETE", "GET"])
 def api_user_handle(username: str) -> flask.Response:
     """
-    Respond to PUT/DELETE/GET requests for user management API.
+    Respond to PUT/PATCH/DELETE/GET requests for user management API.
 
     If handle is given a PUT request, check if user already exists. If so, \
         return code 409. Otherwise, check if request is missing arguments. \
             If so, return code 422. If all checks pass, create user and \
                 return code 201.
+
+    If handle is given a PATCH request, check if user doesn't exist. If so \
+        return code 404. Otherwise, check if request is missing arguments. \
+            If so, return code 422. If all checks pass, apply changes defined \
+                in request JSON arguments, and return code 200.
 
     If handle is given a DELETE request, check if user doesn't exist. If so \
         return code 404. Otherwise, delete user from database.
@@ -125,6 +134,26 @@ def api_user_handle(username: str) -> flask.Response:
         else:
             return flask.Response("{'error': 'Resource already exists.'}", 409,
                                   mimetype="application/json")
+    elif flask.request.method == "PATCH":
+        if user_data is not None:
+            if ("key" not in flask.request.args and "email" not in
+                    flask.request.args) or "solution" not in \
+                        flask.request.args:
+                return flask.Response(
+                    "{'error': 'Request missing arguments.'}", 422,
+                    mimetype="application/json")
+            if validate_challenge(username, flask.request.args["solution"]) \
+                    is not True:
+                return flask.Response("{'error': 'Unauthorized.'}", 401,
+                    mimetype="application/json")
+            database["users"].update_one(
+                {"username": username},
+                {key: value for key, value in fill_template(
+                    flask.request.args, "user.json").items() if value})
+            return flask.Response("", 204, mimetype="application/json")
+        else:
+            return flask.Response("{'error': 'Resource does not exist.'}", 404,
+                                  mimetype="application/json")
     elif flask.request.method == "DELETE":
         if user_data is not None:
             if "solution" not in flask.request.args:
@@ -133,8 +162,7 @@ def api_user_handle(username: str) -> flask.Response:
                     mimetype="application/json")
             if validate_challenge(username, flask.request.args["solution"]) \
                     is not True:
-                return flask.Response(
-                    "{'error': 'Unauthorized.'}", 401,
+                return flask.Response("{'error': 'Unauthorized.'}", 401,
                     mimetype="application/json")
             database["users"].delete_one({"username": username})
             return flask.Response("", 204, mimetype="application/json")
@@ -174,3 +202,15 @@ def api_user_auth_challenge_handle(username: str) -> flask.Response:
     else:
         return flask.Response("{'error': 'Resource does not exist.'}", 404,
                               mimetype="application/json")
+
+@application.route("/api/todo/<todo>",
+                   methods=["PUT", "PATCH", "DELETE", "GET"])
+def api_todo_handle(todo: str) -> flask.Response:
+    """
+    Respond to PUT/PATCH/DELETE/GET requests for to-do management API.
+
+    :param todo: [description]
+    :type todo: str
+    :return: [description]
+    :rtype: flask.Response
+    """
