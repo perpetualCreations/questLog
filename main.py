@@ -43,19 +43,6 @@ def fill_template(arguments: flask.request.ImmutableMultiDict, file: str) -> \
     return template
 
 
-def validate_challenge(username: str, solution: str) -> bool:
-    """
-    Check if solution to challenge is valid for given user.
-
-    :return: True or False for whether or not the solution was correct
-    :rtype: bool
-    """
-    try:
-        return challenge_cache[username]["solution"] == solution
-    except KeyError:
-        return False
-
-
 def fix_challenge(username: str) -> None:
     """
     Given username, check if challenge assigned has expired. If so, replace it.
@@ -76,13 +63,28 @@ def fix_challenge(username: str) -> None:
         else:
             challenge_cache.pop(username)
     solution = urandom(int(config["auth"]["challenge_truth_length"])).hex()
-    gpg = gnupg.GPG(binary=config["auth"]["gpg_binary"])
+    gpg = gnupg.GPG()
     gpg.import_keys(database["users"][username]["key"])
     challenge_cache.update({username: {
         "solution": solution,
-        "challenge": gpg.encrypt(solution),
-        "expiry": None
+        "challenge": gpg.encrypt(solution, ""),
+        "expiry": time() + int(config["auth"]["challenge_expiry_time"])
         }})
+
+
+def validate_challenge(username: str, solution: str) -> bool:
+    """
+    Check if solution to challenge is valid for given user.
+
+    :return: True or False for whether or not the solution was correct
+    :rtype: bool
+    """
+    fix_challenge(username)
+    try:
+        return challenge_cache[username]["solution"] == solution
+    except KeyError:
+        return False
+
 
 @application.route("/api/user/<username>", methods=["PUT", "DELETE", "GET"])
 def api_user_handle(username: str) -> flask.Response:
@@ -125,6 +127,15 @@ def api_user_handle(username: str) -> flask.Response:
                                   mimetype="application/json")
     elif flask.request.method == "DELETE":
         if user_data is not None:
+            if "solution" not in flask.request.args:
+                return flask.Response(
+                    "{'error': 'Request missing arguments.'}", 422,
+                    mimetype="application/json")
+            if validate_challenge(username, flask.request.args["solution"]) \
+                    is not True:
+                return flask.Response(
+                    "{'error': 'Unauthorized.'}", 401,
+                    mimetype="application/json")
             database["users"].delete_one({"username": username})
             return flask.Response("", 204, mimetype="application/json")
         else:
@@ -156,3 +167,10 @@ def api_user_auth_challenge_handle(username: str) -> flask.Response:
     :return: response object with JSON data if applicable, and HTTP status code
     :rtype: flask.Response
     """
+    if database["users"].find_one({"username": username}) is not None:
+        fix_challenge(username)
+        return flask.Response("{'challenge': '" + challenge_cache[username] +
+                              "'}", 200, mimetype="application/json")
+    else:
+        return flask.Response("{'error': 'Resource does not exist.'}", 404,
+                              mimetype="application/json")
