@@ -1,11 +1,10 @@
 {
-    "startTime": "{{ start }}",
-    "endTime": null,
-    "repeat": false,
+    "startTime": 0,
+    "endTime": 0,
     "status": "init",
-    "description": "{{ description }}",
+    "description": "",
     "requires": [],
-    "hubs": [],
-    "authors": [],
+    "hubs": {},
+    "author": "",
     "projects": []
 }

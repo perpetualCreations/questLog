@@ -1,9 +1,10 @@
 {
-    "startTime": "{{ start }}",
-    "endTime": null,
+    "startTime": 0,
+    "endTime": 0,
     "status": "init",
-    "description": "{{ description }}",
+    "description": "",
     "requires": [],
-    "hubs": [],
-    "authors": []
+    "hubs": {},
+    "author": "",
+    "contributors": []
 }
