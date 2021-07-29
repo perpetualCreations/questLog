@@ -285,6 +285,28 @@ Specify key "cancel" to cancel an invitation, specify key "remove" to remove a c
 To accept an invitation, use arguments "contributor" and "solution" without specifiying key "decline" and "author".
 Specify key "decline" to remove oneself from the invitations list, without joining contributors list.
 
-TODO JSON responses for POST.
+* If a POST request made on behalf of the author attempts to remove a contributor who isn't in the contributors list, HTTP code 404 is returned, with the following jSON data:
+
+.. code-block :: json
+
+    {
+        "error": "User not found in contributors."
+    }
+
+* If a POST request made on behalf of the author attempts to cancel an invitation that does not exist, HTTP code 404 is returned, with the following JSON data:
+
+.. code-block :: json
+
+    {
+        "error": "Invitation does not exist."
+    }
+
+* If a POST request made on behalf of a contributor attempts to decline an invitation that does not exist, HTTP code 404 is returned, with the following JSON data:
+
+.. code-block :: json
+
+    {
+        "error": "User not in invitations."
+    }
 
 Projects are resources designed for tracking larger tasks and operations, with many children to-do resources.
