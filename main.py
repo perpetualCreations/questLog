@@ -74,13 +74,15 @@ def fix_challenge(username: str) -> None:
         }})
 
 
-def validate_challenge(username: str, solution: str) -> bool:
+def validate_challenge(username: Union[str, None], solution: str) -> bool:
     """
     Check if solution to challenge is valid for given user.
 
     :return: True or False for whether or not the solution was correct
     :rtype: bool
     """
+    if username is None:
+        return False
     fix_challenge(username)
     try:
         return challenge_cache[username]["solution"] == solution
@@ -103,6 +105,10 @@ def enforce_types(document: dict, template: str) -> bool:
     with open(template) as template_handler:
         template: dict = json_loads(template_handler.read())
         for key in template:
+            if key == "endTime":
+                if document.get(key) not in [int, None]:
+                    return False
+                continue
             if document.get(key) and isinstance(document.get(key),
                                                 type(template[key])):
                 return False
@@ -173,7 +179,7 @@ def api_user_handle(username: str) -> flask.Response:
                     mimetype="application/json")
             return flask.Response('{"error": "Resource already exists."}', 409,
                                   mimetype="application/json")
-        elif flask.request.method == "GET":
+        if flask.request.method == "GET":
             if user_data is not None:
                 return flask.Response(user_data, 200,
                                       mimetype="application/json")
@@ -231,10 +237,11 @@ def api_user_auth_challenge_handle(username: str) -> flask.Response:
     """
     if database["users"].find_one({"name": username}) is not None:
         fix_challenge(username)
-        return flask.Response('{"challenge": ' + challenge_cache[username] +
+        return flask.Response('{"challenge": "' + challenge_cache[username] +
                               '"}', 200, mimetype="application/json")
     return flask.Response('{"error": "Resource does not exist."}', 404,
                           mimetype="application/json")
+
 
 @application.route("/api/todo/<todo>",
                    methods=["PUT", "PATCH", "DELETE", "GET"])
@@ -256,52 +263,62 @@ def api_todo_handle(todo: str) -> flask.Response:
             return flask.Response(todo_data, 200, mimetype="application/json")
         return flask.Response('{"error": "Resource does not exist."}', 404,
                                 mimetype="application/json")
-    else:
-        if not enforce_keys(dict(flask.request.args), ["author", "solution"]):
-            return flask.Response('{"error": "Request missing arguments."}',
-                                  422, mimetype="application/json")
-        if database["user"].find_one(
-                {"name": flask.request.args["author"]}) is None:
-            return flask.Response(
-                '{"error": "Resource linkage to user does not exist."}', 422,
-                mimetype="application/json")
-        if validate_challenge(flask.request.args["author"],
-                              flask.request.args["solution"]) is not True:
-            return flask.Response('{"error": "Unauthorized."}', 401,
-                                  mimetype="application/json")
-        if flask.request.method == "PUT":
-            if todo_data is None:
-                for project in flask.request.args.get("projects", []).copy():
-                    if database["project"].find_one(project) is None or \
-                            (flask.request.args["author"] not in \
-                            database["project"]["contributors"] and \
-                            flask.request.args["author"] != \
-                            database["project"]["author"]):
-                        return flask.Response(
-                            '{"error": "Resource linkage to project is not ' +
-                            'authorized or does not exist."}', 422,
-                            mimetype="application/json")
-                database["todo"].insert_one(
-                    fill_template(flask.request.args, "json/todo.json") +
-                    {"name": todo})
-                return flask.Response("", 201, mimetype="application/json")
-            return flask.Response('{"error": "Resource already exists."}', 409,
-                                  mimetype="application/json")
-        if flask.request.method == "PATCH":
-            if todo_data is not None:
-                database["todo"].update_one(
-                    {"name": todo}, {key: value for key, value in \
-                        fill_template(flask.request.args,
-                                      "json/todo.json").items() if value})
-                return flask.Response("", 204, mimetype="application/json")
-            return flask.Response('{"error": "Resource does not exist."}', 404,
+    if not enforce_keys(dict(flask.request.args), ["author", "solution"]):
+        return flask.Response('{"error": "Request missing arguments."}',
+                                422, mimetype="application/json")
+    if database["user"].find_one(
+            {"name": flask.request.args["author"]}) is None:
+        return flask.Response('{"error": "Resource linkage to user does not '
+                              'exist."}', 422, mimetype="application/json")
+    if todo_data["author"] != flask.request.args["author"] or \
+            validate_challenge(flask.request.args["author"],
+                                flask.request.args["solution"]) is not True:
+        return flask.Response('{"error": "Unauthorized."}', 401,
                                 mimetype="application/json")
-        if flask.request.method == "DELETE":
-            if todo_data is not None:
-                database["todo"].delete_one({"name": todo})
-                return flask.Response("", 204, mimetype="application/json")
-            return flask.Response('{"error": "Resource does not exist."}', 404,
-                                    mimetype="application/json")
+    if flask.request.method == "PUT":
+        if todo_data is None:
+            for project in flask.request.args.get("projects", []):
+                if database["project"].find_one(project) is None or \
+                        (flask.request.args["author"] not in \
+                        database["project"].find_one(project) \
+                        ["contributors"] and flask.request.args["author"] \
+                        != database["project"].find_one(project) \
+                        ["author"]):
+                    return flask.Response(
+                        '{"error": "Resource linkage to project is not ' +
+                        'authorized or does not exist."}', 422,
+                        mimetype="application/json")
+            database["todo"].insert_one(fill_template(
+                flask.request.args, "json/todo.json") + {"name": todo})
+            return flask.Response("", 201, mimetype="application/json")
+        return flask.Response('{"error": "Resource already exists."}', 409,
+                                mimetype="application/json")
+    if flask.request.method == "PATCH":
+        if todo_data is not None:
+            for project in flask.request.args.get("projects", []):
+                if database["project"].find_one(project) is None or \
+                        (flask.request.args["author"] not in \
+                        database["project"].find_one(project) \
+                        ["contributors"] and flask.request.args["author"] \
+                        != database["project"].find_one(project) \
+                        ["author"]):
+                    return flask.Response(
+                        '{"error": "Resource linkage to project is not ' +
+                        'authorized or does not exist."}', 422,
+                        mimetype="application/json")
+            database["todo"].update_one(
+                {"name": todo}, {key: value for key, value in \
+                    fill_template(flask.request.args,
+                                    "json/todo.json").items() if value})
+            return flask.Response("", 204, mimetype="application/json")
+        return flask.Response('{"error": "Resource does not exist."}', 404,
+                              mimetype="application/json")
+    if flask.request.method == "DELETE":
+        if todo_data is not None:
+            database["todo"].delete_one({"name": todo})
+            return flask.Response("", 204, mimetype="application/json")
+        return flask.Response('{"error": "Resource does not exist."}', 404,
+                              mimetype="application/json")
     return flask.Response('{"error": "Method not allowed."}', 405,
                           mimetype="application/json")
 
@@ -310,6 +327,10 @@ def api_todo_handle(todo: str) -> flask.Response:
 def api_project_handle(project: str) -> flask.Response:
     """
     Respond to PUT/PATCH/DELETE/GET/POST requests for project management API.
+
+    FIXME refactor, repeating conditionals and general spaghetti
+    FIXME allow contributors to remove themselves from the contributors list
+    FIXME check if contributor exists when adding new contributors
 
     :param project: name of project to be processed with request
     :type project: str
@@ -327,7 +348,20 @@ def api_project_handle(project: str) -> flask.Response:
                                   mimetype="application/json")
         return flask.Response('{"error": "Resource does not exist."}', 404,
                               mimetype="application/json")
+    if "author" in flask.request.args and database["user"].find_one(
+            {"name": flask.request.args["author"]}) is None:
+        return flask.Response(
+            '{"error": "Resource linkage to user does not exist."}', 422,
+            mimetype="application/json")
+    if "contributor" in flask.request.args and database["user"].find_one(
+            {"name": flask.request.args["contributor"]}) is None:
+        return flask.Response(
+            '{"error": "Resource linkage to user does not exist."}', 422,
+            mimetype="application/json")
     if flask.request.method == "POST":
+        if project_data is None:
+            return flask.Response('{"error": "Resource does not exist."}', 404,
+                                  mimetype="application/json")
         if enforce_keys(dict(flask.request.args), ["solution", "contributor"]):
             if "author" in flask.request.args:
                 if validate_challenge(flask.request.args["author"],
@@ -335,7 +369,16 @@ def api_project_handle(project: str) -> flask.Response:
                                           True:
                     return flask.Response('{"error": "Unauthorized."}', 401,
                                             mimetype="application/json")
-                if "cancel" in flask.request.args:
+                if "remove" in flask.request.args:
+                    if flask.request.args["contributor"] not in \
+                            project_data["contributors"]:
+                        return flask.Response(
+                            '{"error": "User not found to in contributors."}',
+                            404, mimetype="application/json")
+                    database["project"].find_one_and_update(
+                        {"name": project}, {"$pull": {"contributors":
+                            flask.request.args["contributor"]}})
+                elif "cancel" in flask.request.args:
                     if flask.request.args["contributor"] not in \
                             project_data["invitations"]:
                         return flask.Response(
@@ -344,10 +387,10 @@ def api_project_handle(project: str) -> flask.Response:
                     database["project"].find_one_and_update(
                         {"name": project}, {"$pull": {"invitations":
                             flask.request.args["contributor"]}})
-                    return flask.Response("", 204, mimetype="application/json")
-                database["project"].find_one_and_update(
-                    {"name": project}, {"$addToSet": {"invitations":
-                        flask.request.args["contributor"]}})
+                else:
+                    database["project"].find_one_and_update(
+                        {"name": project}, {"$addToSet": {"invitations":
+                            flask.request.args["contributor"]}})
                 return flask.Response("", 204, mimetype="application/json")
             if validate_challenge(flask.request.args["contributor"],
                                 flask.request.args["solution"]) is not True:
@@ -368,25 +411,40 @@ def api_project_handle(project: str) -> flask.Response:
             return flask.Response("", 204, mimetype="application/json")
         return flask.Response('{"error": "Request missing arguments."}',
                               422, mimetype="application/json")
+    if "contributors" in flask.request.args or "invitations" in \
+            flask.request.args:
+        return flask.Response('{"error": "Contributors and invitations '
+                              'cannot be modified through PATCH, PUT, or '
+                              'DELETE."}', 422, mimetype="application/json")
     if flask.request.method == "PATCH":
-        if "contributors" in flask.request.args or "invitations" in \
-                flask.request.args:
-            return flask.Response('{"error": "Contributors and invitations '
-                                  'cannot be modified through PATCH."}', 422,
+        if project_data is None:
+            return flask.Response('{"error": "Resource does not exist."}', 404,
                                   mimetype="application/json")
-        if "solution" not in flask.request.args:
-            return flask.Response('{"error": "Request missing arguments."}',
-                                  422, mimetype="application/json")
         if ("contributor" not in flask.request.args or "author" not in
                 flask.request.args) or "solution" not in \
                 flask.request.args:
             return flask.Response('{"error": "Request missing arguments."}',
                                   422, mimetype="application/json")
+        if "contributor" in flask.request.args and "author" in \
+                flask.request.args:
+            return flask.Response(
+                '{"error": "Cannot authenticate as both author and ' +
+                'contributor."}', 422, mimetype="application/json")
+        if "contributor" in flask.request.args and \
+                flask.request.args["contributor"] not in \
+                    project_data["contributors"]:
+            return flask.Response('{"error": "Unauthorized."}', 401,
+                                  mimetype="application/json")
+        if "author" in flask.request.args and \
+                flask.request.args["author"] != project_data["author"]:
+            return flask.Response('{"error": "Unauthorized."}', 401,
+                                  mimetype="application/json")
         if validate_challenge(
-                flask.request.args["author"], flask.request.args["solution"]) \
-                is not True and validate_challenge(
-                    flask.request.args["contributor"],
-                    flask.request.args["solution"]) is not True:
+                flask.request.args.get("author"),
+                flask.request.args["solution"]) is not True and \
+                    validate_challenge(
+                        flask.request.args.get("contributor"),
+                        flask.request.args["solution"]) is not True:
             return flask.Response('{"error": "Unauthorized."}', 401,
                                   mimetype="application/json")
         if project_data is not None:
@@ -400,11 +458,6 @@ def api_project_handle(project: str) -> flask.Response:
     if not enforce_keys(dict(flask.request.args), ["author", "solution"]):
         return flask.Response('{"error": "Request missing arguments."}',
                                 422, mimetype="application/json")
-    if database["user"].find_one(
-            {"name": flask.request.args["author"]}) is None:
-        return flask.Response(
-            '{"error": "Resource linkage to user does not exist."}', 422,
-            mimetype="application/json")
     if validate_challenge(flask.request.args["author"],
                             flask.request.args["solution"]) is not True:
         return flask.Response('{"error": "Unauthorized."}', 401,
