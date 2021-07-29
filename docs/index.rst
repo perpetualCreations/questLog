@@ -184,7 +184,8 @@ Route:
         "requires": [],
         "hubs": {},
         "author": "",
-        "projects": []
+        "projects": [],
+        "name": ""
     }
 
 ...Where,
@@ -196,7 +197,8 @@ Route:
 * requires is a list of names required for the to-do, it is not checked by the API for validity,
 * hubs is a dictionary of key-pairs for relevant links to the to-do (i.e a Git issue) with keys being the name of the link, and values the actual link,
 * author is the creator of the to-do,
-* projects is a list of names of projects the to-do is associated with, it is checked by the API for validity and authentication (whether the author of the to-do has relevant permissions to link the to-do).
+* projects is a list of names of projects the to-do is associated with, it is checked by the API for validity and authentication (whether the author of the to-do has relevant permissions to link the to-do),
+* name is the name of the to-do.
 
 Methods PATCH and DELETE require authentication. Please include a "solution" argument to your requests.
 
@@ -231,7 +233,8 @@ Route:
         "hubs": {},
         "author": "",
         "contributors": [],
-        "invitations": []
+        "invitations": [],
+        "name": ""
     }
 
 ...Where,
@@ -243,8 +246,9 @@ Route:
 * requires is a list of names required for the project, it is not checked by the API for validity,
 * hubs is a dictionary of key-pairs for relevant links to the project (i.e a project discussion channel) with keys being the name of the link, and values the actual link,
 * author is the creator of the project,
-* contributors is a list of names of users who are contributing to the project, and have edit access over the project resource
-* invitations is a list of names of users who are invited by the author to be contributors
+* contributors is a list of names of users who are contributing to the project, and have edit access over the project resource,
+* invitations is a list of names of users who are invited by the author to be contributors,
+* name is the name of the project.
 
 * If name does exist, and the method is PATCH, PUT, or DELETE, with arguments for key-pairs "contributors" and "invitations", HTTP code 422 is returned, with the following JSON data:
 

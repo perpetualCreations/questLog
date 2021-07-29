@@ -138,24 +138,6 @@ def api_user_handle(username: str) -> flask.Response:
     """
     Respond to PUT/PATCH/DELETE/GET requests for user management API.
 
-    If handle is given a PUT request, check if user already exists. If so, \
-        return code 409. Otherwise, check if request is missing arguments. \
-            If so, return code 422. If all checks pass, create user and \
-                return code 201.
-
-    If handle is given a PATCH request, check if user doesn't exist. If so \
-        return code 404. Otherwise, check if request is missing arguments. \
-            If so, return code 422. If all checks pass, apply changes defined \
-                in request JSON arguments, and return code 200.
-
-    If handle is given a DELETE request, check if user doesn't exist. If so \
-        return code 404. Otherwise, delete user from database.
-
-    If handle is given a GET request, check if user doesn't exist. If so \
-        return code 404. Otherwise, return user data.
-
-    If handle is given a request of any other method, returns code 405.
-
     :param username: name of user to be processed with request
     :type username: str
     :return: response object with JSON data if applicable, and HTTP status code
@@ -166,55 +148,44 @@ def api_user_handle(username: str) -> flask.Response:
                               422, mimetype="application/json")
     user_data: Union[None, dict] = \
         database["users"].find_one({"name": username})
-    if flask.request.method in ["PUT", "GET"]:
-        if flask.request.method == "PUT":
-            if user_data is None:
-                if enforce_keys(dict(flask.request.args), ["key", "email"]):
-                    database["users"].insert_one(
-                        fill_template(flask.request.args, "json/user.json") +
-                        {"name": username})
-                    return flask.Response("", 201, mimetype="application/json")
-                return flask.Response(
-                    '{"error": "Request missing arguments."}', 422,
-                    mimetype="application/json")
-            return flask.Response('{"error": "Resource already exists."}', 409,
-                                  mimetype="application/json")
-        if flask.request.method == "GET":
-            if user_data is not None:
-                return flask.Response(user_data, 200,
-                                      mimetype="application/json")
-            return flask.Response('{"error": "Resource does not exist."}', 404,
-                                  mimetype="application/json")
-    else:
-        if "solution" not in flask.request.args:
+    if flask.request.method == "PUT":
+        if user_data is None:
+            if enforce_keys(dict(flask.request.args), ["key", "email"]):
+                database["users"].insert_one(
+                    fill_template(flask.request.args, "json/user.json") +
+                    {"name": username})
+                return flask.Response("", 201, mimetype="application/json")
             return flask.Response(
                 '{"error": "Request missing arguments."}', 422,
                 mimetype="application/json")
-        if validate_challenge(
-                username, flask.request.args["solution"]) is not True:
-            return flask.Response('{"error": "Unauthorized."}', 401,
-                                  mimetype="application/json")
-        if flask.request.method == "PATCH":
-            if user_data is not None:
-                if "key" not in flask.request.args and "email" not in \
-                        flask.request.args:
-                    return flask.Response(
-                        '{"error": "Request missing arguments."}', 422,
-                        mimetype="application/json")
-
-                database["users"].update_one(
-                    {"name": username}, {key: value for key, value in \
-                        fill_template(flask.request.args,
-                                      "json/user.json").items() if value})
-                return flask.Response("", 204, mimetype="application/json")
-            return flask.Response('{"error": "Resource does not exist."}', 404,
+        return flask.Response('{"error": "Resource already exists."}', 409,
                                 mimetype="application/json")
-        if flask.request.method == "DELETE":
-            if user_data is not None:
-                database["users"].delete_one({"name": username})
-                return flask.Response("", 204, mimetype="application/json")
-            return flask.Response('{"error": "Resource does not exist."}', 404,
+    # from here, all methods require resource to exist
+    if user_data is None:
+        return flask.Response('{"error": "Resource does not exist."}', 404,
+                              mimetype="application/json")
+    if flask.request.method == "GET":
+        return flask.Response(user_data, 200, mimetype="application/json")
+    # from here, all methods require authentication
+    if "solution" not in flask.request.args:
+        return flask.Response('{"error": "Request missing arguments."}', 422,
+                              mimetype="application/json")
+    if validate_challenge(
+            username, flask.request.args["solution"]) is not True:
+        return flask.Response('{"error": "Unauthorized."}', 401,
                                 mimetype="application/json")
+    if flask.request.method == "PATCH":
+        if not enforce_keys(dict(flask.request.args), ["key", "email"]):
+            return flask.Response(
+                '{"error": "Request missing arguments."}', 422,
+                mimetype="application/json")
+        database["users"].update_one(
+            {"name": username}, {key: value for key, value in fill_template(
+                flask.request.args, "json/user.json").items() if value})
+        return flask.Response("", 204, mimetype="application/json")
+    if flask.request.method == "DELETE":
+        database["users"].delete_one({"name": username})
+        return flask.Response("", 204, mimetype="application/json")
     return flask.Response('{"error": "Method not allowed."}', 405,
                           mimetype="application/json")
 
@@ -223,12 +194,6 @@ def api_user_handle(username: str) -> flask.Response:
 def api_user_auth_challenge_handle(username: str) -> flask.Response:
     """
     Respond to GET requests for retrieving GPG auth challenges.
-
-    If handle is given a GET request, check if user doesn't exist. If so \
-        return code 404. Otherwise, collect challenge string and return \
-            response.
-
-    If handle is given a request of any other method, returns code 405.
 
     :param username: name of user to be processed with request
     :type username: str
