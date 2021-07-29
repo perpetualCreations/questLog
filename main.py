@@ -223,11 +223,13 @@ def api_todo_handle(todo: str) -> flask.Response:
         return flask.Response('{"error": "Invalid request argument types.',
                               422, mimetype="application/json")
     todo_data: Union[None, dict] = database["todo"].find_one({"name": todo})
-    if flask.request.method == "GET":
-        if todo_data is not None:
-            return flask.Response(todo_data, 200, mimetype="application/json")
+    # from here, all methods require resource to exist, unless method is PUT
+    if todo_data is None and flask.request.method != "PUT":
         return flask.Response('{"error": "Resource does not exist."}', 404,
-                                mimetype="application/json")
+                              mimetype="application/json")
+    if flask.request.method == "GET":
+        return flask.Response(todo_data, 200, mimetype="application/json")
+    # from here, all methods require authentication
     if not enforce_keys(dict(flask.request.args), ["author", "solution"]):
         return flask.Response('{"error": "Request missing arguments."}',
                                 422, mimetype="application/json")
@@ -240,52 +242,32 @@ def api_todo_handle(todo: str) -> flask.Response:
                                 flask.request.args["solution"]) is not True:
         return flask.Response('{"error": "Unauthorized."}', 401,
                                 mimetype="application/json")
+    if flask.request.method in ["PUT", "PATCH"]:
+        for project in flask.request.args.get("projects", []):
+            if database["project"].find_one(project) is None or (
+                    flask.request.args["author"] not in database["project"].
+                    find_one(project)["contributors"] and flask.request.
+                    args["author"] != database["project"]
+                    .find_one(project)["author"]):
+                return flask.Response(
+                    '{"error": "Resource linkage to project is not ' +
+                    'authorized or does not exist."}', 422,
+                    mimetype="application/json")
     if flask.request.method == "PUT":
         if todo_data is None:
-            for project in flask.request.args.get("projects", []):
-                if database["project"].find_one(project) is None or \
-                        (flask.request.args["author"] not in \
-                        database["project"].find_one(project) \
-                        ["contributors"] and flask.request.args["author"] \
-                        != database["project"].find_one(project) \
-                        ["author"]):
-                    return flask.Response(
-                        '{"error": "Resource linkage to project is not ' +
-                        'authorized or does not exist."}', 422,
-                        mimetype="application/json")
             database["todo"].insert_one(fill_template(
                 flask.request.args, "json/todo.json") + {"name": todo})
             return flask.Response("", 201, mimetype="application/json")
         return flask.Response('{"error": "Resource already exists."}', 409,
                                 mimetype="application/json")
     if flask.request.method == "PATCH":
-        if todo_data is not None:
-            for project in flask.request.args.get("projects", []):
-                if database["project"].find_one(project) is None or \
-                        (flask.request.args["author"] not in \
-                        database["project"].find_one(project) \
-                        ["contributors"] and flask.request.args["author"] \
-                        != database["project"].find_one(project) \
-                        ["author"]):
-                    return flask.Response(
-                        '{"error": "Resource linkage to project is not ' +
-                        'authorized or does not exist."}', 422,
-                        mimetype="application/json")
-            database["todo"].update_one(
-                {"name": todo}, {key: value for key, value in \
-                    fill_template(flask.request.args,
-                                    "json/todo.json").items() if value})
-            return flask.Response("", 204, mimetype="application/json")
-        return flask.Response('{"error": "Resource does not exist."}', 404,
-                              mimetype="application/json")
+        database["todo"].update_one(
+            {"name": todo}, {key: value for key, value in fill_template(
+                flask.request.args, "json/todo.json").items() if value})
+        return flask.Response("", 204, mimetype="application/json")
     if flask.request.method == "DELETE":
-        if todo_data is not None:
-            database["todo"].delete_one({"name": todo})
-            return flask.Response("", 204, mimetype="application/json")
-        return flask.Response('{"error": "Resource does not exist."}', 404,
-                              mimetype="application/json")
-    return flask.Response('{"error": "Method not allowed."}', 405,
-                          mimetype="application/json")
+        database["todo"].delete_one({"name": todo})
+        return flask.Response("", 204, mimetype="application/json")
 
 @application.route("/api/project/<project>",
                    methods=["PUT", "PATCH", "DELETE", "GET", "POST"])

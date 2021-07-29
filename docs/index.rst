@@ -158,6 +158,7 @@ PATCH requests will overwrite key-pairs on database with those defined in the re
 Please exert caution when overwriting the field for the user's public GPG key.
 There is no method of recovering an account if the key is overwritten with an invalid value.
 Moreover, overwiting the key may result in solution submissions being rejected, as the challenge string may have not expired recently, to qualify for re-generation with the new key.
+PATCH requests cannot overwrite the name field.
 
 Users are the basic actors that operate projects and to-dos.
 
@@ -206,6 +207,7 @@ PUT, PATCH, and DELETE requests require arguments "author" (or "contributor") an
 
 PATCH requests will overwrite key-pairs on database with those defined in the request.
 PATCH requests cannot overwrite the author field.
+PATCH requests cannot overwrite the name field.
 
 To-dos are resources designed for tracking specific tasks through their lifecycle.
 
@@ -273,6 +275,7 @@ Attempting to perform a PUT request while authenticating as a contributor will r
 PATCH requests will overwrite key-pairs on database with those defined in the request.
 PATCH requests cannot overwrite the author field.
 PATCH requests also cannot directly overwrite the "contributors" and "invitations" list. Use POST method instead.
+PATCH requests cannot overwrite the name field.
 
 PUT and PATCH requests require arguments "author" and "solution".
 
