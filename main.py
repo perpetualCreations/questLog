@@ -17,19 +17,20 @@ import gnupg
 config: configparser.ConfigParser = configparser.ConfigParser()
 config.read("main.cfg")
 application: flask.Flask = flask.Flask(__name__)
-database: pymongo.MongoClient = \
-    pymongo.MongoClient(config["database"]["host"]).quest_log
+client: pymongo.MongoClient = pymongo.MongoClient(
+    config["database"]["host"], int(config["database"]["port"]))
+database = client.quest_log
 challenge_cache: dict = {}
 
 
-def fill_template(arguments: flask.request.ImmutableMultiDict, file: str) -> \
+def fill_template(arguments: dict, file: str) -> \
         dict:
     """
     Given request arguments and JSON template file, complete template with \
         declared data.
 
     :param arguments: arguments to be applied to template
-    :type arguments: flask.request.ImmutableMultiDict
+    :type arguments: dict
     :param file: path to JSON template file to be read from for template
     :type file: str
     :return: dictionary representation of JSON template completed with request
@@ -152,7 +153,7 @@ def api_user_handle(username: str) -> flask.Response:
         if user_data is None:
             if enforce_keys(dict(flask.request.args), ["key", "email"]):
                 database["users"].insert_one(
-                    fill_template(flask.request.args, "json/user.json") +
+                    fill_template(dict(flask.request.args), "json/user.json") +
                     {"name": username})
                 return flask.Response("", 201, mimetype="application/json")
             return flask.Response(
@@ -181,7 +182,7 @@ def api_user_handle(username: str) -> flask.Response:
                 mimetype="application/json")
         database["users"].update_one(
             {"name": username}, {key: value for key, value in fill_template(
-                flask.request.args, "json/user.json").items() if value})
+                dict(flask.request.args), "json/user.json").items() if value})
         return flask.Response("", 204, mimetype="application/json")
     if flask.request.method == "DELETE":
         database["users"].delete_one({"name": username})
@@ -255,14 +256,14 @@ def api_todo_handle(todo: str) -> flask.Response:
     if flask.request.method == "PUT":
         if todo_data is None:
             database["todo"].insert_one(fill_template(
-                flask.request.args, "json/todo.json") + {"name": todo})
+                dict(flask.request.args), "json/todo.json") + {"name": todo})
             return flask.Response("", 201, mimetype="application/json")
         return flask.Response('{"error": "Resource already exists."}', 409,
                                 mimetype="application/json")
     if flask.request.method == "PATCH":
         database["todo"].update_one(
             {"name": todo}, {key: value for key, value in fill_template(
-                flask.request.args, "json/todo.json").items() if value})
+                dict(flask.request.args), "json/todo.json").items() if value})
         return flask.Response("", 204, mimetype="application/json")
     if flask.request.method == "DELETE":
         database["todo"].delete_one({"name": todo})
@@ -382,8 +383,8 @@ def api_project_handle(project: str) -> flask.Response:
         if project_data is not None:
             database["project"].update_one(
                 {"name": project}, {key: value for key, value in \
-                    fill_template(flask.request.args,
-                                    "json/project.json").items() if value})
+                    fill_template(dict(flask.request.args),
+                                  "json/project.json").items() if value})
             return flask.Response("", 204, mimetype="application/json")
         return flask.Response('{"error": "Resource does not exist."}', 404,
                             mimetype="application/json")
@@ -398,7 +399,7 @@ def api_project_handle(project: str) -> flask.Response:
     if flask.request.method == "PUT":
         if project_data is None:
             database["project"].insert_one(
-                fill_template(flask.request.args, "json/project.json") +
+                fill_template(dict(flask.request.args), "json/project.json") +
                 {"name": project})
             return flask.Response("", 201, mimetype="application/json")
         return flask.Response('{"error": "Resource already exists."}', 409,
@@ -408,3 +409,6 @@ def api_project_handle(project: str) -> flask.Response:
         return flask.Response("", 204, mimetype="application/json")
     return flask.Response('{"error": "Method not allowed."}', 405,
                           mimetype="application/json")
+
+if __name__ == "__main__":
+    application.run(debug=True)
