@@ -6,7 +6,7 @@ Contains responses to URIs.
 
 import configparser
 from json import loads as json_loads
-from typing import Union
+from typing import Union, Literal
 from time import time
 from os import urandom
 import flask
@@ -409,6 +409,26 @@ def api_project_handle(project: str) -> flask.Response:
         return flask.Response("", 204, mimetype="application/json")
     return flask.Response('{"error": "Method not allowed."}', 405,
                           mimetype="application/json")
+
+
+@application.route("/api/<resource>", methods=["GET"])
+def api_user_index_handle(resource: Literal["user", "todo", "project"]) -> \
+        flask.Response:
+    """
+    Respond to GET requests for list of items in resource collection.
+
+    :param resource: name of resource
+    :type resource: Literal["user", "todo", "project"]
+    :return: response object with JSON data if applicable, and HTTP status code
+    :rtype: flask.Response
+    """
+    if resource not in ["user", "todo", "project"]:
+        return flask.Response('{"error": "Resource type unknown."}')
+    return flask.Response(
+        '{"resource": "' + resource + '", "items": ' + str(
+            database[resource].find({}, {"_id": 0, "name": 1})) + '}', 200,
+                          mimetype="application/json")
+
 
 if __name__ == "__main__":
     application.run(debug=True)

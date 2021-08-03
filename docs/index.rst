@@ -310,3 +310,35 @@ Specify key "decline" to remove oneself from the invitations list, without joini
     }
 
 Projects are resources designed for tracking larger tasks and operations, with many children to-do resources.
+
+Index
+-----
+Route:
+
+.. code-block ::
+
+   /api/<resource>
+
+* Accepted methods: GET
+* If the resource type exists and the method is GET, HTTP code 200 is returned, with the following JSON data:
+
+.. code-block :: json
+
+    {
+        "resource": "",
+        "items": []
+    }
+
+...Where,
+* resource is the name of the resource type (user, todo, or project),
+* items is a list of all names in the specified collection.
+
+* If the resource type does not exist and the method is GET, HTTP code 404 is returned, with the following JSON data:
+
+.. code-block :: json
+
+    {
+        "error": "Resource type unknown."
+    }
+
+The index URI is designed for listing all resources in a given collection.
