@@ -290,7 +290,7 @@ Specify key "decline" to remove oneself from the invitations list, without joini
 .. code-block :: json
 
     {
-        "error": "User not found in contributors."
+        "error": "User not in contributors."
     }
 
 * If a POST request made on behalf of the author attempts to cancel an invitation that does not exist, HTTP code 404 is returned, with the following JSON data:
