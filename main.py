@@ -23,13 +23,12 @@ database = client.quest_log
 challenge_cache: dict = {}
 
 
-def fill_template(arguments: dict, file: str) -> dict:
+def fill_template(arguments, file: str) -> dict:
     """
     Given request arguments and JSON template file, complete template with \
         declared data.
 
     :param arguments: arguments to be applied to template
-    :type arguments: dict
     :param file: path to JSON template file to be read from for template
     :type file: str
     :return: dictionary representation of JSON template completed with request
@@ -70,8 +69,7 @@ def fix_challenge(username: str) -> None:
     challenge_cache.update({username: {
         "solution": solution,
         "challenge": gpg.encrypt(solution, ""),
-        "expiry": time() + int(config["auth"]["challenge_expiry_time"])
-        }})
+        "expiry": time() + int(config["auth"]["challenge_expiry_time"])}})
 
 
 def validate_challenge(username: Union[str, None], solution: str) -> bool:
@@ -90,13 +88,12 @@ def validate_challenge(username: Union[str, None], solution: str) -> bool:
         return False
 
 
-def enforce_types(document: dict, template: str) -> bool:
+def enforce_types(document, template: str) -> bool:
     """
     Check if dictionary representing JSON document matches key-value pair \
         typing, compared to absolute templates.
 
     :param document: dictionary to check
-    :type document: dict
     :param template: path to template to read from
     :type template: str
     :return: boolean for whether the dictionary passed or not
@@ -109,18 +106,17 @@ def enforce_types(document: dict, template: str) -> bool:
                 if document.get(key) not in [int, None]:
                     return False
                 continue
-            if document.get(key) and isinstance(document.get(key),
-                                                type(template_data[key])):
+            if document.get(key) and not isinstance(
+                    document.get(key), type(template_data[key])):
                 return False
     return True
 
 
-def enforce_keys(document: dict, keys: list) -> bool:
+def enforce_keys(document, keys: list) -> bool:
     """
     Check if dictionary representing JSON document is missing keys given.
 
     :param document: dictionary to check
-    :type document: dict
     :param keys: list of keys to check for
     :type keys: list
     :return: boolean for whether the dictionary passed or not
@@ -130,6 +126,49 @@ def enforce_keys(document: dict, keys: list) -> bool:
         if key not in document:
             return False
     return True
+
+
+def update_dict_inline(origin: dict, changes: dict) -> dict:
+    """
+    Update origin dictionary with changes dictionary.
+
+    Saves having to add extra lines simply for updating dictionaries, as it \
+        simplifies:
+
+    data = {}
+    data.update({None: None})
+    function_using_data(data)
+
+    To:
+
+    function_using_data(update_dict_inline({}, {None: None}))
+
+    :param origin: original dictionary
+    :type origin: dict
+    :param changes: changes dictionary
+    :type changes: dict
+    :return: original dictionary updated with changes dictionary
+    :rtype: dict
+    """
+    origin.update(changes)
+    return origin
+
+
+def empty_dict_if_none(data: Union[None, dict]) -> dict:
+    """
+    If None, return empty dictionary, otherwise return originial dictionary.
+
+    There's totally a better way of expressing this, cleverly, without an \
+        if statement.
+
+    :param data: data that might be None, or a populated dictionary
+    :type data: Union[None, dict]
+    :return: empty dictionary if None, or the original populated dictionary
+    :rtype: dict
+    """
+    if not data:
+        return {}
+    return data
 
 
 @application.route("/api/user/<username>",
@@ -143,46 +182,46 @@ def api_user_handle(username: str) -> flask.Response:
     :return: response object with JSON data if applicable, and HTTP status code
     :rtype: flask.Response
     """
-    if not enforce_types(flask.request.args.to_dict(), "json/user.json"):
-        return flask.Response('{"error": "Invalid request argument types."}',
-                              422, mimetype="application/json")
     user_data: Union[None, dict] = \
         database["users"].find_one({"name": username})
-    if flask.request.method == "PUT":
-        if user_data is None:
-            if enforce_keys(flask.request.args.to_dict(), ["key", "email"]):
-                database["users"].insert_one(fill_template(
-                    flask.request.args.to_dict(), "json/user.json").update(
-                        {"name": username}))
-                return flask.Response("", 201, mimetype="application/json")
-            return flask.Response(
-                '{"error": "Request missing arguments."}', 422,
-                mimetype="application/json")
-        return flask.Response('{"error": "Resource already exists."}', 409,
-                              mimetype="application/json")
-    # from here, all methods require resource to exist
-    if user_data is None:
+    if not user_data and flask.request.method != "PUT":
         return flask.Response('{"error": "Resource does not exist."}', 404,
                               mimetype="application/json")
+    if user_data and flask.request.method == "PUT":
+        return flask.Response('{"error": "Resource already exists."}', 409,
+                              mimetype="application/json")
+    if user_data:
+        user_data.pop("_id")
     if flask.request.method == "GET":
-        return flask.Response(user_data, 200, mimetype="application/json")
+        return flask.Response(str(user_data), 200, mimetype="application/json")
+    arguments = empty_dict_if_none(flask.request.get_json())
+    if not enforce_types(arguments, "json/user.json"):
+        return flask.Response('{"error": "Invalid request argument types."}',
+                              422, mimetype="application/json")
+    if flask.request.method == "PUT":
+        if enforce_keys(arguments, ["key", "email"]):
+            database["users"].insert_one(update_dict_inline(fill_template(
+                arguments, "json/user.json"), {"name": username}))
+            return flask.Response("", 201, mimetype="application/json")
+        return flask.Response(
+            '{"error": "Request missing arguments."}', 422,
+            mimetype="application/json")
     # from here, all methods require authentication
-    if "solution" not in flask.request.args:
+    if "solution" not in arguments:
         return flask.Response('{"error": "Request missing arguments."}', 422,
                               mimetype="application/json")
     if validate_challenge(
-            username, flask.request.args["solution"]) is not True:
+            username, arguments["solution"]) is not True:
         return flask.Response('{"error": "Unauthorized."}', 401,
                               mimetype="application/json")
     if flask.request.method == "PATCH":
-        if not enforce_keys(flask.request.args.to_dict(), ["key", "email"]):
+        if not enforce_keys(flask.request.get_json(), ["key", "email"]):
             return flask.Response(
                 '{"error": "Request missing arguments."}', 422,
                 mimetype="application/json")
         database["users"].update_one(
             {"name": username}, {key: value for key, value in fill_template(
-                flask.request.args.to_dict(), "json/user.json").items() if
-                                 value})
+                flask.request.get_json(), "json/user.json").items() if value})
         return flask.Response("", 204, mimetype="application/json")
     if flask.request.method == "DELETE":
         database["users"].delete_one({"name": username})
@@ -220,33 +259,38 @@ def api_todo_handle(todo: str) -> flask.Response:
     :return: response object with JSON data if applicable, and HTTP status code
     :rtype: flask.Response
     """
-    if not enforce_types(flask.request.args.to_dict(), "json/todo.json"):
-        return flask.Response('{"error": "Invalid request argument types."}',
-                              422, mimetype="application/json")
-    if database["todo"].find_one({"name": todo}) is None and \
-            flask.request.method != "PUT":
+    todo_data: Union[None, dict] = database["todo"].find_one({"name": todo})
+    if not todo_data and flask.request.method != "PUT":
+        return flask.Response('{"error": "Resource already exists."}', 409,
+                              mimetype="application/json")
+    if todo_data and flask.request.method == "PUT":
         return flask.Response('{"error": "Resource does not exist."}', 404,
                               mimetype="application/json")
-    todo_data: dict = database["todo"].find_one({"name": todo})
+    if todo_data:
+        todo_data.pop("_id")
     if flask.request.method == "GET":
-        return flask.Response(todo_data, 200, mimetype="application/json")
+        return flask.Response(str(todo_data), 200, mimetype="application/json")
+    arguments = empty_dict_if_none(flask.request.get_json())
+    if not enforce_types(arguments, "json/todo.json"):
+        return flask.Response('{"error": "Invalid request argument types."}',
+                              422, mimetype="application/json")
     # from here, all methods require authentication
-    if not enforce_keys(flask.request.args.to_dict(), ["author", "solution"]):
+    if not enforce_keys(flask.request.get_json(), ["author", "solution"]):
         return flask.Response('{"error": "Request missing arguments."}', 422,
                               mimetype="application/json")
     if database["user"].find_one(
-            {"name": flask.request.args["author"]}) is None:
+            {"name": arguments["author"]}) is None:
         return flask.Response('{"error": "Resource linkage to user does not '
                               'exist."}', 422, mimetype="application/json")
-    if todo_data["author"] != flask.request.args["author"] or \
-            validate_challenge(flask.request.args["author"],
-                               flask.request.args["solution"]) is not True:
+    if todo_data and todo_data["author"] != arguments["author"] or \
+            validate_challenge(arguments["author"], arguments["solution"]) is \
+            not True:
         return flask.Response('{"error": "Unauthorized."}', 401,
                               mimetype="application/json")
     if flask.request.method in ["PUT", "PATCH"]:
-        for project in flask.request.args.get("projects", []):
+        for project in arguments.get("projects", []):
             if database["project"].find_one(project) is None or (
-                    flask.request.args["author"] not in database["project"].
+                    arguments["author"] not in database["project"].
                     find_one(project)["contributors"] and flask.request.
                     args["author"] != database["project"]
                     .find_one(project)["author"]):
@@ -254,18 +298,13 @@ def api_todo_handle(todo: str) -> flask.Response:
                     '{"error": "Resource linkage to project is not authorized '
                     'or does not exist."}', 422, mimetype="application/json")
     if flask.request.method == "PUT":
-        if todo_data is None:
-            database["todo"].insert_one(fill_template(
-                flask.request.args.to_dict(), "json/todo.json").update(
-                    {"name": todo}))
-            return flask.Response("", 201, mimetype="application/json")
-        return flask.Response('{"error": "Resource already exists."}', 409,
-                              mimetype="application/json")
+        database["todo"].insert_one(update_dict_inline(
+            fill_template(flask.request.get_json(), "json/todo.json"),
+            {"name": todo}))
     if flask.request.method == "PATCH":
         database["todo"].update_one(
             {"name": todo}, {key: value for key, value in fill_template(
-                flask.request.args.to_dict(), "json/todo.json").items() if
-                             value})
+                flask.request.get_json(), "json/todo.json").items() if value})
         return flask.Response("", 204, mimetype="application/json")
     if flask.request.method == "DELETE":
         database["todo"].delete_one({"name": todo})
@@ -285,131 +324,126 @@ def api_project_handle(project: str) -> flask.Response:
     :return: response object with JSON data if applicable, and HTTP status code
     :rtype: flask.Response
     """
-    if not enforce_types(flask.request.args.to_dict(), "json/project.json"):
-        return flask.Response('{"error": "Invalid request argument types.',
-                              422, mimetype="application/json")
-    if database["project"].find_one({"name": project}) is None and \
-            flask.request.method != "PUT":
+    project_data: Union[None, dict] = \
+        database["project"].find_one({"name": project})
+    if not project_data and flask.request.method != "PUT":
         return flask.Response('{"error": "Resource does not exist."}', 404,
                               mimetype="application/json")
-    project_data: dict = database["project"].find_one({"name": project})
-    # from here, all methods require resource to exist, unless method is PUT
+    if project_data and flask.request.method == "PUT":
+        return flask.Response('{"error": "Resource already exists."}', 409,
+                              mimetype="application/json")
+    if project_data:
+        project_data.pop("_id")
     if flask.request.method == "GET":
-        return flask.Response(project_data, 200, mimetype="application/json")
-    if database["user"].find_one({"name": flask.request.args.get(
-            "author", "")}) is None and database["user"].find_one(
-                {"name": flask.request.args.get("contributor", "")}) is None:
+        return flask.Response(str(project_data), 200,
+                              mimetype="application/json")
+    arguments = empty_dict_if_none(flask.request.get_json())
+    if not enforce_types(arguments, "json/project.json"):
+        return flask.Response('{"error": "Invalid request argument types.',
+                              422, mimetype="application/json")
+    if database["user"].find_one({"name": arguments.get("author", "")}) is \
+            None and database["user"].find_one({"name": arguments.get(
+                "contributor", "")}) is None:
         return flask.Response(
             '{"error": "Resource linkage to user does not exist."}', 422,
             mimetype="application/json")
     if flask.request.method == "POST":
-        if enforce_keys(flask.request.args.to_dict(),
-                        ["solution", "contributor"]):
-            if "author" in flask.request.args:
-                if validate_challenge(flask.request.args["author"],
-                                      flask.request.args["solution"]) is not \
-                                          True:
+        if enforce_keys(arguments, ["solution", "contributor"]):
+            if "author" in arguments:
+                if validate_challenge(arguments["author"],
+                                      arguments["solution"]) is not True:
                     return flask.Response('{"error": "Unauthorized."}', 401,
                                           mimetype="application/json")
-                if "remove" in flask.request.args:
-                    if flask.request.args["contributor"] not in \
-                            project_data["contributors"]:
+                if "remove" in arguments:
+                    if project_data and arguments["contributor"] not \
+                            in project_data["contributors"]:
                         return flask.Response(
                             '{"error": "User not in contributors."}',
                             404, mimetype="application/json")
                     database["project"].find_one_and_update(
                         {"name": project}, {"$pull": {
-                            "contributors": flask.request.args[
+                            "contributors": arguments[
                                 "contributor"]}})
-                elif "cancel" in flask.request.args:
-                    if flask.request.args["contributor"] not in \
-                            project_data["invitations"]:
+                elif "cancel" in arguments:
+                    if project_data and arguments["contributor"] not \
+                            in project_data["invitations"]:
                         return flask.Response(
                             '{"error": "Invitation does not exist."}', 404,
                             mimetype="application/json")
                     database["project"].find_one_and_update(
                         {"name": project}, {"$pull": {
-                            "invitations": flask.request.args["contributor"]}})
+                            "invitations": arguments["contributor"]}})
                 else:
                     database["project"].find_one_and_update(
                         {"name": project}, {"$addToSet": {
-                            "invitations": flask.request.args["contributor"]}})
+                            "invitations": arguments["contributor"]}})
                 return flask.Response("", 204, mimetype="application/json")
-            if validate_challenge(flask.request.args["contributor"],
-                                  flask.request.args["solution"]) is not True:
+            if validate_challenge(arguments["contributor"],
+                                  arguments["solution"]) is not True:
                 return flask.Response('{"error": "Unauthorized."}', 401,
                                       mimetype="application/json")
-            if flask.request.args["contributor"] not in \
+            if project_data and arguments["contributor"] not in \
                     project_data["invitations"]:
                 return flask.Response('{"error": "User not in invitations."}',
                                       422, mimetype="application/json")
             database["project"].find_one_and_update(
                 {"name": project}, {"$pull": {
-                    "invitations": flask.request.args["contributor"]}})
-            if "decline" not in flask.request.args:
+                    "invitations": arguments["contributor"]}})
+            if "decline" not in arguments:
                 database["project"].find_one_and_update(
                     {"name": project}, {"$addToSet": {
-                        "contributors": flask.request.args["contributor"]}})
+                        "contributors": arguments["contributor"]}})
             return flask.Response("", 204, mimetype="application/json")
         return flask.Response('{"error": "Request missing arguments."}',
                               422, mimetype="application/json")
-    if "contributors" in flask.request.args or "invitations" in \
-            flask.request.args:
+    if "contributors" in arguments or "invitations" in arguments:
         return flask.Response('{"error": "Contributors and invitations '
                               'cannot be modified through PATCH, PUT, or '
                               'DELETE."}', 422, mimetype="application/json")
     if flask.request.method == "PATCH":
-        if ("contributor" not in flask.request.args or "author" not in
-                flask.request.args) or "solution" not in \
-                flask.request.args:
+        if ("contributor" not in arguments or "author" not in arguments) or \
+                "solution" not in arguments:
             return flask.Response('{"error": "Request missing arguments."}',
                                   422, mimetype="application/json")
-        if "contributor" in flask.request.args and "author" in \
-                flask.request.args:
+        if "contributor" in arguments and "author" in arguments:
             return flask.Response(
                 '{"error": "Cannot authenticate as both author and ' +
                 'contributor."}', 422, mimetype="application/json")
-        if "contributor" in flask.request.args and \
-                flask.request.args["contributor"] not in \
-                project_data["contributors"]:
+        if project_data and "contributor" in arguments and \
+                arguments["contributor"] not in project_data["contributors"]:
             return flask.Response('{"error": "Unauthorized."}', 401,
                                   mimetype="application/json")
-        if "author" in flask.request.args and \
-                flask.request.args["author"] != project_data["author"]:
+        if project_data and "author" in arguments and \
+                arguments["author"] != project_data["author"]:
             return flask.Response('{"error": "Unauthorized."}', 401,
                                   mimetype="application/json")
-        if validate_challenge(
-                flask.request.args.get("author"),
-                flask.request.args["solution"]) is not True and \
-                validate_challenge(
-                    flask.request.args.get("contributor"),
-                    flask.request.args["solution"]) is not True:
+        if validate_challenge(arguments.get("author"), arguments["solution"]) \
+                is not True and validate_challenge(
+                    arguments.get("contributor"), arguments["solution"]) is \
+                    not True:
             return flask.Response('{"error": "Unauthorized."}', 401,
                                   mimetype="application/json")
         if project_data is not None:
             database["project"].update_one(
                 {"name": project}, {key: value for key, value in fill_template(
-                    flask.request.args.to_dict(), "json/project.json").items()
-                                    if value})
+                    flask.request.get_json(), "json/project.json").items() if
+                                    value})
             return flask.Response("", 204, mimetype="application/json")
         return flask.Response('{"error": "Resource does not exist."}', 404,
                               mimetype="application/json")
-    if not enforce_keys(flask.request.args.to_dict(), ["author", "solution"]):
+    if not enforce_keys(flask.request.get_json(), ["author", "solution"]):
         return flask.Response('{"error": "Request missing arguments."}', 422,
                               mimetype="application/json")
-    if validate_challenge(flask.request.args["author"],
-                          flask.request.args["solution"]) is not True:
+    if validate_challenge(arguments["author"],
+                          arguments["solution"]) is not True:
         return flask.Response('{"error": "Unauthorized."}', 401,
                               mimetype="application/json")
     # from here, all methods require AUTHOR authentication
     if flask.request.method == "PUT":
-        if project_data is None:
-            database["project"].insert_one(
-                fill_template(flask.request.args.to_dict(),
-                              "json/project.json").update({"name": project}))
-            return flask.Response("", 201, mimetype="application/json")
-        return flask.Response('{"error": "Resource already exists."}', 409,
-                              mimetype="application/json")
+        database["project"].insert_one(update_dict_inline(
+            fill_template(flask.request.get_json(), "json/project.json"),
+            {"name": project}))
+        return flask.Response("", 201, mimetype="application/json")
     if flask.request.method == "DELETE":
         database["project"].delete_one({"name": project})
         return flask.Response("", 204, mimetype="application/json")
