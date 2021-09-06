@@ -6,6 +6,7 @@ Contains responses to URIs.
 
 import configparser
 from json import loads as json_loads
+from json import dumps as json_dumps
 from typing import Union, Literal
 from time import time
 from os import urandom
@@ -70,11 +71,11 @@ def fix_challenge(username: str) -> None:
     final = cipher.encrypt_and_digest(solution.encode("ascii"))  # type: ignore
     challenge_cache.update({username: {
         "solution": solution,
-        "challenge": final[0],
+        "challenge": final[0].hex(),
         "session": PKCS1_OAEP.new(RSA.import_key(database["users"].find_one({
             "name": username})["key"].encode("ascii"))).encrypt(session).hex(),
-        "nonce": cipher.nonce,  # type: ignore
-        "tag": final[1],
+        "nonce": cipher.nonce.hex(),  # type: ignore
+        "tag": final[1].hex(),
         "expiry": time() + int(config["auth"]["challenge_expiry_time"])}})
 
 
@@ -199,7 +200,8 @@ def api_user_handle(username: str) -> flask.Response:
     if user_data:
         user_data.pop("_id")
     if flask.request.method == "GET":
-        return flask.Response(str(user_data), 200, mimetype="application/json")
+        return flask.Response(json_dumps(user_data), 200,
+                              mimetype="application/json")
     arguments = empty_dict_if_none(flask.request.get_json())
     if not enforce_types(arguments, "json/user.json"):
         return flask.Response('{"error": "Invalid request argument types."}',
@@ -256,7 +258,8 @@ def api_user_auth_challenge_handle(username: str) -> flask.Response:
         fix_challenge(username)
         challenge = challenge_cache[username].copy()
         challenge.pop("solution")
-        return flask.Response(str(challenge), 200, mimetype="application/json")
+        return flask.Response(json_dumps(challenge), 200,
+                              mimetype="application/json")
     return flask.Response('{"error": "Resource does not exist."}', 404,
                           mimetype="application/json")
 
@@ -282,7 +285,8 @@ def api_todo_handle(todo: str) -> flask.Response:
     if todo_data:
         todo_data.pop("_id")
     if flask.request.method == "GET":
-        return flask.Response(str(todo_data), 200, mimetype="application/json")
+        return flask.Response(json_dumps(todo_data), 200,
+                              mimetype="application/json")
     arguments = empty_dict_if_none(flask.request.get_json())
     if not enforce_types(arguments, "json/todo.json"):
         return flask.Response('{"error": "Invalid request argument types."}',
@@ -348,7 +352,7 @@ def api_project_handle(project: str) -> flask.Response:
     if project_data:
         project_data.pop("_id")
     if flask.request.method == "GET":
-        return flask.Response(str(project_data), 200,
+        return flask.Response(json_dumps(project_data), 200,
                               mimetype="application/json")
     arguments = empty_dict_if_none(flask.request.get_json())
     if not enforce_types(arguments, "json/project.json"):
