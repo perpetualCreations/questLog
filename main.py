@@ -11,7 +11,8 @@ from time import time
 from os import urandom
 import flask
 import pymongo
-import gnupg
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Cipher import AES, PKCS1_OAEP
 
 
 config: configparser.ConfigParser = configparser.ConfigParser()
@@ -64,11 +65,16 @@ def fix_challenge(username: str) -> None:
             return None
         challenge_cache.pop(username)
     solution = urandom(int(config["auth"]["challenge_truth_length"])).hex()
-    gpg = gnupg.GPG()
-    gpg.import_keys(database["users"][username]["key"])
+    session = urandom(16)
+    cipher = AES.new(session, AES.MODE_EAX)
+    final = cipher.encrypt_and_digest(solution.encode("ascii"))  # type: ignore
     challenge_cache.update({username: {
         "solution": solution,
-        "challenge": gpg.encrypt(solution, ""),
+        "challenge": final[0],
+        "session": PKCS1_OAEP.new(RSA.import_key(database["users"].find_one({
+            "name": username})["key"])).encrypt(session).hex(),
+        "nonce": cipher.nonce,  # type: ignore
+        "tag": final[1],
         "expiry": time() + int(config["auth"]["challenge_expiry_time"])}})
 
 
@@ -242,8 +248,9 @@ def api_user_auth_challenge_handle(username: str) -> flask.Response:
     """
     if database["users"].find_one({"name": username}) is not None:
         fix_challenge(username)
-        return flask.Response('{"challenge": "' + challenge_cache[username] +
-                              '"}', 200, mimetype="application/json")
+        challenge = challenge_cache[username].copy()
+        challenge.pop("solution")
+        return flask.Response(str(challenge), 200, mimetype="application/json")
     return flask.Response('{"error": "Resource does not exist."}', 404,
                           mimetype="application/json")
 
@@ -420,7 +427,7 @@ def api_project_handle(project: str) -> flask.Response:
         if validate_challenge(arguments.get("author"), arguments["solution"]) \
                 is not True and validate_challenge(
                     arguments.get("contributor"), arguments["solution"]) is \
-                    not True:
+                not True:
             return flask.Response('{"error": "Unauthorized."}', 401,
                                   mimetype="application/json")
         if project_data is not None:

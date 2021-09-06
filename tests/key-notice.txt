@@ -1,6 +1,0 @@
-The keypairs in the tests directory are solely meant for testing, and aren't linked to any actual identities.
-
-They are completely safe to redistribute, without the risk of compromising anyone's digital presence.
-They also lack any expiration date.
-
-Please don't file a security report regarding these keys with the guise of disclosing a secret leakage.

@@ -15,13 +15,14 @@ Indices and tables
 
 Resources
 ---------
-The questLog REST API is based around three types of resources,
+The questLog REST API is based around four types of resources,
 
 * Users (canonically "user")
 * To-Dos (canonically "todo")
 * Projcts (canonically "project")
+* Challenges (canonically "challenge")
 
-Additionally to the three aforementioned resource types is "challenge" which handles user authentication.
+The fourth resource type handles user authentication, through a challenge-solution mechanism.
 
 Use route,
 
@@ -107,21 +108,38 @@ Route:
 .. code-block :: json
 
     {
-       "challenge": "<challenge string>"
+       "challenge": "",
+       "session": "",
+       "expiry": "",
+       "nonce": "",
+       "tag": "",
     }
 
-The authentication mechanism uses a user's GPG public key to encrypt a randrom string of text, hence to be referred to as the "challenge" string.
+...Where,
 
-This "challenge" string is presented in the standard API route, with type as "challenge" and the name as the name of the user the public key was derived from.
-The string is responsible for authenticating any requests that claim to be executed by the user associated to the public key.
-Said string will be re-generated with a new random string, the duration between re-generation dictated by the "main.cfg" configuration file (see comments in file for specific field).
-The length of the random string can also be controlled through the aforementioned configuration file.
+* challenge is the encrypted string, that when decrypted, returns a "truth" string,
+* session is the encrypted AES session key, which after decryption is to be used to further decrypt the challenge string,
+* expiry is the UNIX timestamp notating when the challenge is expired, and is no longer valid,
+* nonce is the cryptographic nonce,
+* tag is the message authentication code, which ensures data integrity.
 
-The authentication scheme assumes the end-user must be in possesion of their GPG private key, the sole key able to decrypt strings encrypted by the public key.
-Methods that require authentication will need key-value pair in the request, the key called "solution", the value being the decrypted challenge string.
+The key-value pairs above are in hexadecimal form. Please convert them back into bytes upon receiving the JSON data.
 
-Applications should first request the challenge string for the current user, and then follow steps for decryption, and distribute the solution as required for requests.
-Please note due to challenge string rotation, applications should repeat the previous steps regularly to keep up with challenge updates.
+Challenges are responsible for user authentication.
+
+When sending requests that require user authentication, any applications interfacing with the API must include a key-value pair called "solution" which associates to a random string of text.
+This solution string is to be treated like a temporary password for its associated user, of which the request is being performed on behalf of.
+The ephemeral nature of the solution string means it will expire. The lifespan of the solution string is dictated by the "main.cfg" configuration file (see comments in file for specific field). The default is 900 seconds.
+Upon expiration, the accepted solution string will change. Any requests made with previous solution strings will be rejected.
+By default, the solution string represented in byte-form (canonically, it's in hexadecimal form for encoding reasons) is 2048 bytes long. This is also configurable through the "main.cfg" configuration file.
+
+To acquire a solution for a user, an application must first be in possession of the user's RSA private key.
+Assuming this condition is met, the application then is to request the user challenge, with the key-value pairs shown above.
+Then, it should decrypt the AES session key using the RSA private key with PCKS#1 OAEP.
+The final solution string is to be decrypted using the newly obtained AES session key, plugging in the nonce and tag into the decryption function.
+
+Again, the solution string will expire, and upon expiration, the challenge will be regenerated.
+It's recommended to check a cached challenge's expiry timestamp, and if the timestamp stated has past, repeat operations required to procure a new solution string.
 
 Users
 -----
@@ -146,7 +164,7 @@ Route:
 
 ...Where,
 
-* key is the GPG public key for authenticating requests made upon behalf of this user,
+* key is the RSA public key for authenticating requests made upon behalf of this user,
 * email is an email address belonging to the user,
 * name being the unique name of the user.
 
@@ -155,7 +173,7 @@ Methods PATCH and DELETE require authentication. Please include a "solution" arg
 PUT requests require arguments "key" and "email".
 
 PATCH requests will overwrite key-pairs on database with those defined in the request.
-Please exert caution when overwriting the field for the user's public GPG key.
+Please exert caution when overwriting the field for the user's public RSA key.
 There is no method of recovering an account if the key is overwritten with an invalid value.
 Moreover, overwiting the key may result in solution submissions being rejected, as the challenge string may have not expired recently, to qualify for re-generation with the new key.
 PATCH requests cannot overwrite the name field.
