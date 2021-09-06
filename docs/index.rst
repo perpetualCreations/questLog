@@ -167,6 +167,14 @@ Route:
 * key is the RSA public key for authenticating requests made upon behalf of this user,
 * email is an email address belonging to the user,
 * name being the unique name of the user.
+* PUT requests must also have a valid RSA public key for key-value pair "key".
+* If the RSA public key given for a PUT request is not valid, HTTP code 422 is returned, with the following JSON data:
+
+.. code-block :: json
+
+    {
+        "error": "Key is not acceptable as RSA user public key."
+    }
 
 Methods PATCH and DELETE require authentication. Please include a "solution" argument to your requests.
 

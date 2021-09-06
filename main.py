@@ -72,7 +72,7 @@ def fix_challenge(username: str) -> None:
         "solution": solution,
         "challenge": final[0],
         "session": PKCS1_OAEP.new(RSA.import_key(database["users"].find_one({
-            "name": username})["key"])).encrypt(session).hex(),
+            "name": username})["key"].encode("ascii"))).encrypt(session).hex(),
         "nonce": cipher.nonce,  # type: ignore
         "tag": final[1],
         "expiry": time() + int(config["auth"]["challenge_expiry_time"])}})
@@ -206,6 +206,12 @@ def api_user_handle(username: str) -> flask.Response:
                               422, mimetype="application/json")
     if flask.request.method == "PUT":
         if enforce_keys(arguments, ["key", "email"]):
+            try:
+                RSA.import_key(arguments["key"].encode("ascii"))
+            except ValueError:
+                return flask.Response('{"error": "Key is not acceptable as RSA'
+                                      ' user public key."}', 422,
+                                      mimetype="application/json")
             database["users"].insert_one(update_dict_inline(fill_template(
                 arguments, "json/user.json"), {"name": username}))
             return flask.Response("", 201, mimetype="application/json")
