@@ -1,0 +1,5 @@
+{
+    uid(func: eq(name, $name) {
+        uid
+    }
+}

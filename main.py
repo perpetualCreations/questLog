@@ -5,168 +5,229 @@ Contains responses to URIs.
 """
 
 import configparser
-from json import loads as json_loads
 from json import dumps as json_dumps
-from typing import Union, Literal
+from json import loads as json_loads
+from typing import Union, Literal, Tuple, Dict, List, Optional, Any
+from string import Template
 from time import time
 from os import urandom
+from ast import literal_eval
 import flask
-import pymongo
+import pydgraph
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Cipher import AES, PKCS1_OAEP
 
 
+# load configuration file.
 config: configparser.ConfigParser = configparser.ConfigParser()
 config.read("main.cfg")
+
+
+def graph_connect() -> Tuple[pydgraph.DgraphClientStub, pydgraph.DgraphClient]:
+    """Create Dgraph server connection and client."""
+    connection: pydgraph.DgraphClientStub = \
+        pydgraph.DgraphClientStub(config["database"]["host"])
+    return connection, pydgraph.DgraphClient(connection)
+
+
+# set dgraph database schema.
+with open("schema/data.schema") as schema_handler:
+    connection, client = graph_connect()
+    client.alter(pydgraph.Operation(schema=schema_handler.read()))
+    connection.close()
+# start flask server.
 application: flask.Flask = flask.Flask(__name__)
-client: pymongo.MongoClient = pymongo.MongoClient(
-    config["database"]["host"], int(config["database"]["port"]))
-database = client.quest_log
+# create challenge dictionary variable, for storing authentication challenges
 challenge_cache: dict = {}
 
 
-def fill_template(arguments, file: str) -> dict:
+def graph_get(query: Literal["user", "userkey", "uid"],
+              parameters: Dict[str, str]) -> List[dict]:
     """
-    Given request arguments and JSON template file, complete template with \
-        declared data.
+    Handle query to the Dgraph server, given a query name.
 
-    :param arguments: arguments to be applied to template
-    :param file: path to JSON template file to be read from for template
-    :type file: str
-    :return: dictionary representation of JSON template completed with request
-        arguments
+    :param query: name of defined query
+    :type query: Literal["user", "userkey"]
+    :param parameters: dictionary containing query parameters to subsitute into
+        template query
+    :type parameters: Dict[str, str]
+    :return: query data returned from database server
     :rtype: dict
     """
-    with open(file) as template_handler:
-        template: dict = json_loads(template_handler.read())
-    for field in template:
-        try:
-            template[field] = arguments[field]
-        except KeyError:
-            continue
-    return template
+    with open("schema/" + query + ".query") as query_handler:
+        connection, client = graph_connect()
+        result = json_loads(client.txn(read_only=True).query(
+            Template(query_handler.read()).substitute(parameters)).json)
+        connection.close()
+        if result["data"] is None:
+            raise Exception(result["errors"])
+        return result["data"][query]
 
 
-def fix_challenge(username: str) -> None:
+def graph_create(ntype: Literal["user"], parameters: Dict[str, Any]) -> \
+        Optional[str]:
     """
-    Given username, check if challenge assigned has expired. If so, replace it.
+    Handle creation mutation to the Dgraph server, given a type.
+
+    :param ntype: name of defined type
+    :type ntype: Literal["user"]
+    :param parameters: dictionary containing type parameters to subsitute into
+        template type
+    :type parameters: Dict[str, Any]
+    :raises TypeError: type-related exception if supplied parameters have
+        incorrect types, passes key with invalid type as exception message
+    :return: UID of created node, or None if creation failed
+    :rtype: Optional[str]
+    """
+    with open("schema/" + ntype + ".type") as create_handler:
+        connection, client = graph_connect()
+        transaction = client.txn()
+        try:
+            data = literal_eval(create_handler.read())
+            for key in data.keys():
+                if not isinstance(parameters[key], type(data[key])):
+                    raise TypeError(key)
+                data[key] = parameters[key]
+            data.update({"uid": "_:new", "dgraph.type": ntype.capitalize()})
+            response = transaction.mutate(set_obj=data)
+            transaction.commit()
+            return response.uids["new"]
+        finally:
+            transaction.discard()
+
+
+def graph_delete(uid: str) -> None:
+    """
+    Handle deletion mutation to the Dgraph server, given a UID.
+
+    :param uid: UID of node for deletion
+    :type uid: str
+    :return: None
+    """
+    connection, client = graph_connect()
+    transaction = client.txn()
+    try:
+        transaction.mutate(del_obj={"uid": uid})
+        transaction.commit()
+    finally:
+        transaction.discard()
+
+
+def check_key(key: str) -> Optional[flask.Response]:
+    """
+    Check if given RSA public key is acceptable.
+
+    :param key: supplied RSA key
+    :type key: str
+    :return: error response if key is not valid
+    :rtype: Optional[flask.Response]
+    """
+    try:
+        RSA.import_key(key.encode("ascii"))
+        return None
+    except ValueError:
+        return flask.Response('{"error": "Key is not acceptable as RSA'
+                              ' user public key."}', 422,
+                              mimetype="application/json")
+
+
+def fix_challenge(uid: str) -> Optional[str]:
+    """
+    Given UID, check if challenge assigned has expired. If so, replace it.
 
     Uses database connection to retrieve GPG public key to encrypt a string \
         of random characters, the truth string, which is used to authenticate \
             requests.
 
-    Will also create new challenges if no challenge entry for the username \
-        exists.
+    Will also create new challenges if no challenge entry for the uid exists.
 
-    :param username: name of user to be referenced
-    :type username: str
+    :param uid: name of user to be referenced
+    :type uid: str
+    :return: if key retrieval by UID failed due to a request error, string
+        containing the contents of the error message
+    :rtype: Optional[str]
     """
-    if username in challenge_cache:
-        if challenge_cache[username]["expiry"] > time():
+    if uid in challenge_cache:
+        if challenge_cache[uid]["expiry"] > time():
             return None
-        challenge_cache.pop(username)
+        challenge_cache.pop(uid)
+    try:
+        key = graph_get("userkey", {"uid": uid})[0]["key"]
+    except Exception as error:
+        return json_dumps(error)
+    except IndexError:
+        return None
+    except KeyError:
+        return None
     solution = urandom(int(config["auth"]["challenge_truth_length"])).hex()
     session = urandom(16)
     cipher = AES.new(session, AES.MODE_EAX)
     final = cipher.encrypt_and_digest(solution.encode("ascii"))  # type: ignore
-    challenge_cache.update({username: {
+    challenge_cache.update({uid: {
         "solution": solution,
         "challenge": final[0].hex(),
-        "session": PKCS1_OAEP.new(RSA.import_key(database["users"].find_one({
-            "name": username})["key"].encode("ascii"))).encrypt(session).hex(),
+        "session": PKCS1_OAEP.new(RSA.import_key(key.encode("ascii")))
+        .encrypt(session).hex(),
         "nonce": cipher.nonce.hex(),  # type: ignore
         "tag": final[1].hex(),
         "expiry": time() + int(config["auth"]["challenge_expiry_time"])}})
+    # return statement to make mypy happy.
+    return None
 
 
-def validate_challenge(username: Union[str, None], solution: str) -> bool:
+def validate_challenge(uid: str, solution: str) -> Union[bool, str]:
     """
     Check if solution to challenge is valid for given user.
 
     :return: True or False for whether or not the solution was correct
     :rtype: bool
     """
-    if username is None:
-        return False
-    fix_challenge(username)
+    fix_out = fix_challenge(uid)
+    if fix_out:
+        return fix_out
     try:
-        return challenge_cache[username]["solution"] == solution
+        return challenge_cache[uid]["solution"] == solution
     except KeyError:
         return False
 
 
-def enforce_types(document, template: str) -> bool:
+def check_exists(data: list) -> flask.Response:
     """
-    Check if dictionary representing JSON document matches key-value pair \
-        typing, compared to absolute templates.
+    If query data is empty, return flask.Response object declaring that the \
+        requested resource does not exist. Otherwise, throw exception.
 
-    :param document: dictionary to check
-    :param template: path to template to read from
-    :type template: str
-    :return: boolean for whether the dictionary passed or not
-    :rtype: bool
+    :param data: query data returned from a graph request
+    :type data: list
+    :return: error response
+    :rtype: flask.Response
+    :raises Exception: generic exception if query is not empty
     """
-    with open(template) as template_handler:
-        template_data: dict = json_loads(template_handler.read())
-        for key in template_data:
-            if key == "endTime":
-                if document.get(key) not in [int, None]:
-                    return False
-                continue
-            if document.get(key) and not isinstance(
-                    document.get(key), type(template_data[key])):
-                return False
-    return True
+    if data:
+        raise Exception("Query is not empty.")
+    return flask.Response('{"error": "Resource does not exist."}', 404,
+                          mimetype="application/json")
 
 
-def enforce_keys(document, keys: list) -> bool:
+def check_not_exists(data: list) -> flask.Response:
     """
-    Check if dictionary representing JSON document is missing keys given.
+    If query data is not empty, return flask.Response object declaring that \
+        the requested resource already exists. Otherwise, throw exception.
 
-    :param document: dictionary to check
-    :param keys: list of keys to check for
-    :type keys: list
-    :return: boolean for whether the dictionary passed or not
-    :rtype: bool
+    :param data: query data returned from a graph request
+    :type data: list
+    :return: error response
+    :rtype: flask.Response
+    :raises Exception: generic exception if query is empty
     """
-    for key in keys:
-        if key not in document:
-            return False
-    return True
-
-
-def update_dict_inline(origin: dict, changes: dict) -> dict:
-    """
-    Update origin dictionary with changes dictionary.
-
-    Saves having to add extra lines simply for updating dictionaries, as it \
-        simplifies:
-
-    data = {}
-    data.update({None: None})
-    function_using_data(data)
-
-    To:
-
-    function_using_data(update_dict_inline({}, {None: None}))
-
-    :param origin: original dictionary
-    :type origin: dict
-    :param changes: changes dictionary
-    :type changes: dict
-    :return: original dictionary updated with changes dictionary
-    :rtype: dict
-    """
-    origin.update(changes)
-    return origin
+    if not data:
+        raise Exception("Query is empty.")
+    return flask.Response('{"error": "Resource already exists."}', 409,
+                          mimetype="application/json")
 
 
 def empty_dict_if_none(data: Union[None, dict]) -> dict:
     """
     If None, return empty dictionary, otherwise return originial dictionary.
-
-    There's totally a better way of expressing this, cleverly, without an \
-        if statement.
 
     :param data: data that might be None, or a populated dictionary
     :type data: Union[None, dict]
@@ -178,90 +239,128 @@ def empty_dict_if_none(data: Union[None, dict]) -> dict:
     return data
 
 
-@application.route("/api/user/<username>",
-                   methods=["PUT", "PATCH", "DELETE", "GET"])
-def api_user_handle(username: str) -> flask.Response:
+@application.route("/api/uid/<name>", methods=["GET"])
+def api_uid_handle(name: str) -> flask.Response:
     """
-    Respond to PUT/PATCH/DELETE/GET requests for user management API.
+    Respond to GET requests for getting UID of a node by its name.
 
-    :param username: name of user to be processed with request
-    :type username: str
+    :param name: name of node to search for
+    :type name: str
     :return: response object with JSON data if applicable, and HTTP status code
     :rtype: flask.Response
     """
-    user_data: Union[None, dict] = \
-        database["users"].find_one({"name": username})
-    if not user_data and flask.request.method != "PUT":
-        return flask.Response('{"error": "Resource does not exist."}', 404,
-                              mimetype="application/json")
-    if user_data and flask.request.method == "PUT":
-        return flask.Response('{"error": "Resource already exists."}', 409,
-                              mimetype="application/json")
-    if user_data:
-        user_data.pop("_id")
-    if flask.request.method == "GET":
-        return flask.Response(json_dumps(user_data), 200,
-                              mimetype="application/json")
-    arguments = empty_dict_if_none(flask.request.get_json())
-    if not enforce_types(arguments, "json/user.json"):
-        return flask.Response('{"error": "Invalid request argument types."}',
-                              422, mimetype="application/json")
-    if flask.request.method == "PUT":
-        if enforce_keys(arguments, ["key", "email"]):
-            try:
-                RSA.import_key(arguments["key"].encode("ascii"))
-            except ValueError:
-                return flask.Response('{"error": "Key is not acceptable as RSA'
-                                      ' user public key."}', 422,
-                                      mimetype="application/json")
-            database["users"].insert_one(update_dict_inline(fill_template(
-                arguments, "json/user.json"), {"name": username}))
-            return flask.Response("", 201, mimetype="application/json")
+    return flask.Response(json_dumps({"data": graph_get(
+        "uid", {"name": name})}), 200, mimetype="application/json")
+
+
+@application.route("/api/user/<uid>", methods=["GET"])
+def api_user_handle_get(uid: str) -> flask.Response:
+    """
+    Respond to GET requests for user management API.
+
+    :param uid: UID of user to be processed with request
+    :type uid: str
+    :return: response object with JSON data if applicable, and HTTP status code
+    :rtype: flask.Response
+    """
+    data = graph_get("user", {"uid": uid})
+    try:
+        return check_exists(data)
+    except Exception:
         return flask.Response(
-            '{"error": "Request missing arguments."}', 422,
-            mimetype="application/json")
-    # from here, all methods require authentication
-    if "solution" not in arguments:
-        return flask.Response('{"error": "Request missing arguments."}', 422,
-                              mimetype="application/json")
-    if validate_challenge(
-            username, arguments["solution"]) is not True:
-        return flask.Response('{"error": "Unauthorized."}', 401,
-                              mimetype="application/json")
-    if flask.request.method == "PATCH":
-        if not enforce_keys(flask.request.get_json(), ["key", "email"]):
-            return flask.Response(
-                '{"error": "Request missing arguments."}', 422,
-                mimetype="application/json")
-        database["users"].update_one(
-            {"name": username}, {key: value for key, value in fill_template(
-                flask.request.get_json(), "json/user.json").items() if value})
-        return flask.Response("", 204, mimetype="application/json")
-    if flask.request.method == "DELETE":
-        database["users"].delete_one({"name": username})
-        return flask.Response("", 204, mimetype="application/json")
-    return flask.Response('{"error": "Method not allowed."}', 405,
-                          mimetype="application/json")
+            json_dumps({"data": data}), 200, mimetype="application/json")
 
 
-@application.route("/api/challenge/<username>", methods=["GET"])
-def api_user_auth_challenge_handle(username: str) -> flask.Response:
+@application.route("/api/challenge/<uid>", methods=["GET"])
+def api_user_auth_challenge_handle(uid: str) -> flask.Response:
     """
-    Respond to GET requests for retrieving GPG auth challenges.
+    Respond to GET requests for retrieving authentication challenges.
 
-    :param username: name of user to be processed with request
-    :type username: str
+    :param uid: UID of user to be processed with request
+    :type uid: str
     :return: response object with JSON data if applicable, and HTTP status code
     :rtype: flask.Response
     """
-    if database["users"].find_one({"name": username}) is not None:
-        fix_challenge(username)
-        challenge = challenge_cache[username].copy()
+    data = graph_get("user", {"uid": uid})
+    try:
+        return check_exists(data)
+    except Exception:
+        fix_out = fix_challenge(uid)
+        if fix_out:
+            return flask.Response(json_dumps({"error": fix_out}), 500,
+                                  mimetype="application/json")
+        challenge = challenge_cache[uid].copy()
+        # i hate how the removal of this one line will thwart authentication
         challenge.pop("solution")
         return flask.Response(json_dumps(challenge), 200,
                               mimetype="application/json")
-    return flask.Response('{"error": "Resource does not exist."}', 404,
+
+
+@application.route("/api/user/", methods=["PUT"])
+def api_user_handle_put() -> flask.Response:
+    """
+    Respond to PUT requests for user management API.
+
+    :return: response object with JSON data if applicable, and HTTP status code
+    :rtype: flask.Response
+    """
+    arguments = empty_dict_if_none(flask.request.get_json())
+    try:
+        data = graph_get("uid", {"name": arguments["name"]})
+        if config["database"]["fraud"] is False:
+            try:
+                return check_exists(data)
+            except Exception:
+                pass
+        check_key_result = check_key(arguments["key"])
+        if check_key_result:
+            return check_key_result
+        try:
+            uid = graph_create("user", arguments)
+            if not uid:
+                return flask.Response(
+                    '{"error": "Unable to produce UID, creation has likely '
+                    'failed."}', 500, mimetype="application/json")
+        except TypeError as invalid_key:
+            return flask.Response(
+                '{"error": "Invalid request argument type(s), exception thrown'
+                ' on key ' + str(invalid_key) + '."}', 422,
+                mimetype="application/json")
+    except KeyError:
+        flask.Response('{"error": "Request missing arguments."}', 422,
+                       mimetype="application/json")
+    # str() call is redundant, to appease the mypy gods.
+    return flask.Response('{"uid":"' + str(uid) + '"}', 201,
                           mimetype="application/json")
+
+
+@application.route("/api/user/<uid>", methods=["PATCH", "DELETE"])
+def api_user_handle_patch_and_delete(uid: str) -> flask.Response:
+    """
+    Respond to PATCH/DELETE requests for user management API.
+
+    :param uid: UID of user to be processed with request
+    :type uid: str
+    :return: response object with JSON data if applicable, and HTTP status code
+    :rtype: flask.Response
+    """
+    data = graph_get("user", {"uid": uid})
+    arguments = empty_dict_if_none(flask.request.get_json())
+    try:
+        return check_exists(data)
+    except Exception:
+        try:
+            if validate_challenge(uid, arguments["solution"]) is False:
+                return flask.Response('{"error": "Unauthorized."}', 401,
+                                      mimetype="application/json")
+            if flask.request.method == "PATCH":
+                pass
+            elif flask.request.method == "DELETE":
+                graph_delete(uid)
+        except KeyError:
+            flask.Response('{"error": "Request missing arguments."}', 422,
+                           mimetype="application/json")
+    return flask.Response(status=204)
 
 
 @application.route("/api/todo/<todo>",

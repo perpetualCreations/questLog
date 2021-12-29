@@ -1,0 +1,49 @@
+name: string @lang @index{term} .
+email: string @index{term} .
+time.start: dateTime @index{day} .
+time.end: dateTime @index{day} .
+status: string @lang @index{exact} .
+description: string @lang{term} .
+key: string .
+public: bool .
+authors: [uid] @count .
+contributors: [uid] @count .
+tasks: [uid] @count .
+dependencies: [uid] @count .
+hubs: [uid] .
+url: string .
+
+type User {
+    name
+    email
+    key
+}
+
+type Hub {
+    name
+    url
+}
+
+type Todo {
+    name
+    time.start
+    time.end
+    status
+    description
+    public
+    authors User
+}
+
+type Project {
+    name
+    time.start
+    time.end
+    status
+    description
+    public
+    authors User
+    contributors User
+    tasks Todo
+    dependencies Project
+    hubs Hub
+}
