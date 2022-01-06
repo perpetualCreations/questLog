@@ -6,26 +6,24 @@ type User @auth(
                 queryUser(filter: {name: {eq: $preferred_username}}) {
                     name
                 }
-            }
-    }
+            }"""
+        }
     update: {
         rule: """
             query($preferred_username: String!) {
                 queryUser(filter: {name: {eq: $preferred_username}}) {
                     name
                 }
-            }
-        }"""
-    }
+            }"""
+        }
     delete: {
         rule: """
             query($preferred_username: String!) {
                 queryUser(filter: {name: {eq: $preferred_username}}) {
                     name
                 }
-            }
-        }"""
-    }
+            }"""
+        }
 ) {
     name: String! @id @search(by: [exact])
     email: String! @search(by: [exact])
@@ -62,9 +60,8 @@ interface Objective @auth(
                         name
                     }
                 }
-            }
-        }"""
-    }
+            }"""
+        }
     update: {
         rule: """
             query($preferred_username: String!) {
@@ -73,9 +70,8 @@ interface Objective @auth(
                         name
                     }
                 }
-            }
-        }"""
-    }
+            }"""
+        }
     delete: {
         rule: """
             query($preferred_username: String!) {
@@ -84,9 +80,8 @@ interface Objective @auth(
                         name
                     }
                 }
-            }
-        }"""
-    }
+            }"""
+        }
 ) {
     name: String! @id @search(by: [fulltext, exact])
     start: DateTime @search(by: [hour])
