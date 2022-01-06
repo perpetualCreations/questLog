@@ -1,0 +1,144 @@
+type User @auth(
+    # for add, update, and delete mutations, check auth token for matching username.
+    add: {
+        rule: """
+            query($preferred_username: String!) {
+                queryUser(filter: {name: {eq: $preferred_username}}) {
+                    name
+                }
+            }
+    }
+    update: {
+        rule: """
+            query($preferred_username: String!) {
+                queryUser(filter: {name: {eq: $preferred_username}}) {
+                    name
+                }
+            }
+        }"""
+    }
+    delete: {
+        rule: """
+            query($preferred_username: String!) {
+                queryUser(filter: {name: {eq: $preferred_username}}) {
+                    name
+                }
+            }
+        }"""
+    }
+) {
+    name: String! @id @search(by: [exact])
+    email: String! @search(by: [exact])
+    tasks: [Task] @hasInverse(field: authors)
+    routines: [Routine] @hasInverse(field: authors)
+    projects: [Project] @hasInverse(field: authors)
+}
+
+interface Objective @auth(
+    # require authentication.
+    # for query and add, update, and delete mutations, check auth token for
+    # username in authors field containing array of users.
+    # allow query regardless if objective is public.
+    query: {
+        or: [
+            {rule: "query {queryObjective(filter: {public: true}) {name}}"}
+            {rule: """
+                query($preferred_username: String!) {
+                    queryObjective() {
+                        name
+                        authors(filter: {
+                            name: {eq: $preferred_username}
+                        })
+                    }
+                }"""
+            }
+        ]
+    }
+    add: {
+        rule: """
+            query($preferred_username: String!) {
+                queryObjective() {
+                    authors(filter: {name: {eq: $preferred_username}}) {
+                        name
+                    }
+                }
+            }
+        }"""
+    }
+    update: {
+        rule: """
+            query($preferred_username: String!) {
+                queryObjective() {
+                    authors(filter: {name: {eq: $preferred_username}}) {
+                        name
+                    }
+                }
+            }
+        }"""
+    }
+    delete: {
+        rule: """
+            query($preferred_username: String!) {
+                queryObjective() {
+                    authors(filter: {name: {eq: $preferred_username}}) {
+                        name
+                    }
+                }
+            }
+        }"""
+    }
+) {
+    name: String! @id @search(by: [fulltext, exact])
+    start: DateTime @search(by: [hour])
+    expire: DateTime @search(by: [hour])
+    description: String @search(by: [term])
+    public: Boolean!
+    authors: [User]!
+    pending: [Objective]
+}
+
+enum StatusTask {
+    INIT
+    WIP
+    DONE
+    DEAD
+}
+
+type Task implements Objective {
+    status: StatusTask!
+    projects: [Project] @hasInverse(field: tasks)
+}
+
+enum StatusRoutine {
+    INIT
+    ACTIVE
+    DEAD
+}
+
+type Routine implements Objective {
+    status: StatusRoutine!
+    projects: [Project] @hasInverse(field: routines)
+    cron: String!
+}
+
+enum StatusProject {
+    INIT
+    ALPHA
+    BETA
+    FULL
+    MAINTENANCE
+    DEAD
+}
+
+type Project implements Objective @auth() {
+    start: DateTime @search(by: [hour])
+    status: StatusRoutine
+    icon: String
+    homepage: String
+    tasks: [Task]
+    routines: [Routine]
+    dependencies: [Project]
+    dependents: [Project] @hasInverse(field: dependencies)
+}
+
+# Dgraph.Authorization {"VerificationKey": "$uploader-VerificationKey", "Header": "$uploader-Header", "Namespace": "", "Algo": "RS256", "Audience": []}

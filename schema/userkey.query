@@ -1,5 +1,0 @@
-{
-    userkey(func: uid($uid)) @filter(type(User) {
-        key
-    }
-}

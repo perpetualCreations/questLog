@@ -1,6 +1,0 @@
-{
-    user(func: uid($uid)) @filter(type(User)) {
-        name
-        email
-    }
-}
