@@ -4,3 +4,4 @@ docs-test/
 __pycache__
 .vscode
 .mypy_cache
+test/
