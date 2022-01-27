@@ -10,6 +10,7 @@ with open("schema.graphql") as schema_handler:
     schema = schema_handler.read()
     schema = schema.replace("$uploader-VerificationKey", config["fill"]["key"])
     schema = schema.replace("$uploader-Header", config["fill"]["header"])
+    schema = schema.replace("$uploader-Namespace", config["fill"]["namespace"])
 
 r = requests.post(literal_eval(config["target"]["host"]), schema)
 

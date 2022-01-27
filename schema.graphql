@@ -136,4 +136,4 @@ type Project implements Objective @auth() {
     dependents: [Project] @hasInverse(field: dependencies)
 }
 
-# Dgraph.Authorization {"VerificationKey": $uploader-VerificationKey, "Header": $uploader-Header, "Namespace": "", "Algo": "RS256", "Audience": []}
+# Dgraph.Authorization {"VerificationKey": $uploader-VerificationKey, "Header": $uploader-Header, "Namespace": $uploader-Namespace, "Algo": "RS256", "Audience": []}
